@@ -346,8 +346,10 @@ func RecieveMsg(conn net.Conn) *Msg {
             glog.Println("receive msg parse err:", err)
             return nil
         }
-        ip, _      := gip.ParseAddress(conn.RemoteAddr().String())
-        msg.Info.Ip = ip
+        if msg.Info.Ip == "127.0.0.1" || msg.Info.Ip == "" {
+            ip, _      := gip.ParseAddress(conn.RemoteAddr().String())
+            msg.Info.Ip = ip
+        }
         return &msg
     }
     return nil

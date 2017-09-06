@@ -158,6 +158,11 @@ func (n *Node) initFromCfg() {
         }
         glog.SetLogPath(logpath)
     }
+    // (可选)节点地址IP或者域名
+    address := j.GetString("Address")
+    if address != "" {
+        n.setIp(address)
+    }
     // (可选)初始化节点列表，包含自定义的所需添加的服务器IP或者域名列表
     peers := j.GetArray("Peers")
     if peers != nil {
