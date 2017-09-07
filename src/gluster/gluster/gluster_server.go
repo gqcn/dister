@@ -17,6 +17,7 @@ import (
     "strings"
     "os"
     "errors"
+    "g/util/grand"
 )
 
 // 获取数据
@@ -246,6 +247,7 @@ func (n *Node) SendToLeader(head int, port int, body string) error {
 }
 
 // 通过IP向一个节点发送消息并建立双方联系
+// HI只是建立联系，并不做其他处理，例如谁更适合作为leader判断是通过心跳流程来处理的
 func (n *Node) sayHi(ip string) bool {
     if ip == n.Ip {
         return false
@@ -267,10 +269,6 @@ func (n *Node) sayHi(ip string) bool {
     msg := n.receiveMsg(conn)
     if msg != nil && msg.Head == gMSG_RAFT_HI2 {
         n.updatePeerInfo(msg.Info)
-        if msg.Info.RaftRole == gROLE_RAFT_LEADER && n.Leader == nil && n.getRaftRole() != gROLE_RAFT_LEADER {
-            n.setLeader(&msg.Info)
-            n.setRaftRole(gROLE_RAFT_FOLLOWER)
-        }
     }
     return true
 }
@@ -285,6 +283,35 @@ func (n *Node) sayHiToLocalLan() {
     for i := 1; i < 256; i++ {
         go n.sayHi(fmt.Sprintf("%s.%d", segment, i))
     }
+}
+
+// 与远程节点对比谁可以成为leader，返回true表示自己，false表示对方节点
+// 需要同时对比日志信息及选举比分
+func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
+    if info.RaftRole != gROLE_RAFT_LEADER {
+        return true
+    }
+    if n.getRaftRole() != gROLE_RAFT_LEADER {
+        return false;
+    }
+    result := false
+    if n.getLogCount() > info.LogCount && n.getLastLogId() > info.LastLogId {
+        result = true
+    } else if n.getLogCount() == info.LogCount && n.getLastLogId() == info.LastLogId {
+        if n.getScoreCount() > info.ScoreCount {
+            result = true
+        } else if n.getScoreCount() == info.ScoreCount {
+            if n.getScore() > info.Score {
+                result = true
+            } else if n.getScore() == info.Score {
+                // 极少数情况, 这时采用随机策略
+                if grand.Rand(0, 1) == 0 {
+                    result = true
+                }
+            }
+        }
+    }
+    return result
 }
 
 // 检查链接是否属于本地的一个链接(即：自己链接自己)

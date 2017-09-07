@@ -2,7 +2,6 @@ package gluster
 
 import (
     "net"
-    "g/util/grand"
     "g/encoding/gjson"
     "g/os/glog"
 )
@@ -37,30 +36,6 @@ func (n *Node) raftTcpHandler(conn net.Conn) {
     n.raftTcpHandler(conn)
 }
 
-// 检测split brains问题，检查两个leader的连通性
-// 如果不连通，那么follower保持当前leader不变
-// 如果能够连通，那么需要在两个leader中确定一个
-func (n *Node) onMsgRaftSplitBrainsCheck(conn net.Conn, msg *Msg) {
-    checkip := msg.Body
-    result  := gMSG_RAFT_SPLIT_BRAINS_UNSET
-    tconn   := n.getConn(checkip, gPORT_RAFT)
-    if tconn != nil {
-        if n.sendMsg(tconn, gMSG_RAFT_HI, "") == nil {
-            rmsg := n.receiveMsg(tconn)
-            if rmsg != nil {
-                n.updatePeerInfo(rmsg.Info)
-                if n.getLogCount() < msg.Info.LogCount && n.getLastLogId() < msg.Info.LastLogId {
-                    n.setLeader(&rmsg.Info)
-                    n.setRaftRole(gROLE_RAFT_FOLLOWER)
-                    result = gMSG_RAFT_RESPONSE
-                }
-            }
-        }
-        tconn.Close()
-    }
-    n.sendMsg(conn, result, "")
-}
-
 // 处理split brains问题
 func (n *Node) onMsgRaftSplitBrainsUnset(conn net.Conn, msg *Msg) {
     glog.Println("split brains occurred, remove node:", msg.Info.Name)
@@ -81,27 +56,11 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
         return
     }
     result := gMSG_RAFT_HEARTBEAT
-
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         // 如果是两个leader相互心跳，表示两个leader是连通的，这时根据算法算出一个leader即可
-        // 需要同时对比日志信息及选举比分
-        if n.getLogCount() > msg.Info.LogCount && n.getLastLogId() > msg.Info.LastLogId {
+        if n.compareLeaderWithRemoteNode(&msg.Info) {
             result = gMSG_RAFT_I_AM_LEADER
-        } else if n.getLogCount() == msg.Info.LogCount && n.getLastLogId() == msg.Info.LastLogId {
-            if n.getScoreCount() > msg.Info.ScoreCount {
-                result = gMSG_RAFT_I_AM_LEADER
-            } else if n.getScoreCount() == msg.Info.ScoreCount {
-                if n.getScore() > msg.Info.Score {
-                    result = gMSG_RAFT_I_AM_LEADER
-                } else if n.getScore() == msg.Info.Score {
-                    // 极少数情况, 这时采用随机策略
-                    if grand.Rand(0, 1) == 1 {
-                        result = gMSG_RAFT_I_AM_LEADER
-                    }
-                }
-            }
-        }
-        if result == gMSG_RAFT_HEARTBEAT {
+        } else {
             n.setLeader(&msg.Info)
             n.setRaftRole(gROLE_RAFT_FOLLOWER)
         }
@@ -120,17 +79,51 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
                 if n.sendMsg(leaderConn, gMSG_RAFT_SPLIT_BRAINS_CHECK, msg.Info.Ip) == nil {
                     rmsg := n.receiveMsg(leaderConn)
                     if rmsg != nil {
-                        if msg.Head == gMSG_RAFT_SPLIT_BRAINS_UNSET {
-                            result = gMSG_RAFT_SPLIT_BRAINS_UNSET
-                            n.updatePeerStatus(msg.Info.Id, gSTATUS_DEAD)
-                        } else {
-                            n.setLeader(&msg.Info)
+                        switch msg.Head {
+                            case gMSG_RAFT_SPLIT_BRAINS_UNSET:
+                                result = gMSG_RAFT_SPLIT_BRAINS_UNSET
+                                n.updatePeerStatus(msg.Info.Id, gSTATUS_DEAD)
+                            case gMSG_RAFT_SPLIT_BRAINS_CHANGE:
+                                n.setLeader(&msg.Info)
                         }
                     }
                 }
                 leaderConn.Close()
+            } else {
+                // 如果leader连接不上，那么表示leader已经死掉，替换为新的leader
+                n.setLeader(&msg.Info)
             }
         }
+    }
+    n.sendMsg(conn, result, "")
+}
+
+// 检测split brains问题，检查两个leader的连通性
+// 如果不连通，那么follower保持当前leader不变
+// 如果能够连通，那么需要在两个leader中确定一个
+func (n *Node) onMsgRaftSplitBrainsCheck(conn net.Conn, msg *Msg) {
+    checkip := msg.Body
+    result  := gMSG_RAFT_RESPONSE
+    if n.getRaftRole() == gROLE_RAFT_LEADER {
+        tconn := n.getConn(checkip, gPORT_RAFT)
+        if tconn == nil {
+            result = gMSG_RAFT_SPLIT_BRAINS_UNSET
+        } else {
+            defer tconn.Close()
+            if n.sendMsg(tconn, gMSG_RAFT_HI, "") == nil {
+                rmsg := n.receiveMsg(tconn)
+                if rmsg != nil {
+                    n.updatePeerInfo(rmsg.Info)
+                    if !n.compareLeaderWithRemoteNode(&rmsg.Info) {
+                        n.setLeader(&rmsg.Info)
+                        n.setRaftRole(gROLE_RAFT_FOLLOWER)
+                        result = gMSG_RAFT_SPLIT_BRAINS_CHANGE
+                    }
+                }
+            }
+        }
+    } else {
+        result = gMSG_RAFT_SPLIT_BRAINS_CHANGE
     }
     n.sendMsg(conn, result, "")
 }
@@ -151,27 +144,12 @@ func (n *Node) onMsgRaftScoreCompareRequest(conn net.Conn, msg *Msg) {
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         result = gMSG_RAFT_I_AM_LEADER
     } else {
-        // 需要同时对比日志信息和比分
-        if n.getLogCount() > msg.Info.LogCount && n.getLastLogId() > msg.Info.LastLogId {
+        if n.compareLeaderWithRemoteNode(&msg.Info) {
             result = gMSG_RAFT_SCORE_COMPARE_FAILURE
-        } else if n.getLogCount() == msg.Info.LogCount && n.getLastLogId() == msg.Info.LastLogId {
-            if n.getScoreCount() > msg.Info.ScoreCount {
-                result = gMSG_RAFT_SCORE_COMPARE_FAILURE
-            } else if n.getScoreCount() == msg.Info.ScoreCount {
-                if n.getScore() > msg.Info.Score {
-                    result = gMSG_RAFT_SCORE_COMPARE_FAILURE
-                } else if n.getScore() == msg.Info.Score {
-                    // 极少数情况, 这时采用随机策略
-                    if grand.Rand(0, 1) == 1 {
-                        result = gMSG_RAFT_SCORE_COMPARE_FAILURE
-                    }
-                }
-            }
+        } else {
+            n.setLeader(&msg.Info)
+            n.setRaftRole(gROLE_RAFT_FOLLOWER)
         }
-    }
-    if result == gMSG_RAFT_SCORE_COMPARE_SUCCESS {
-        n.setLeader(&msg.Info)
-        n.setRaftRole(gROLE_RAFT_FOLLOWER)
     }
     n.sendMsg(conn, result, "")
 }
