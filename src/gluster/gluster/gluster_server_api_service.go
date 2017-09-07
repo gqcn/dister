@@ -34,7 +34,7 @@ import (
 
 
 // service 查询
-func (this *NodeApiService) GET(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiService) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     name := r.GetRequestString("name")
     if name == "" {
         w.ResponseJson(1, "ok", *this.node.ServiceForApi.Clone())
@@ -48,12 +48,12 @@ func (this *NodeApiService) GET(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
 }
 
 // service 新增
-func (this *NodeApiService) PUT(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    this.POST(r, w)
+func (this *NodeApiService) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+    this.Post(r, w)
 }
 
 // service 修改
-func (this *NodeApiService) POST(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]ServiceStruct, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {
@@ -71,7 +71,7 @@ func (this *NodeApiService) POST(r *ghttp.ClientRequest, w *ghttp.ServerResponse
 }
 
 // service 删除
-func (this *NodeApiService) DELETE(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiService) Delete(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {

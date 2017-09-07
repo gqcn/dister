@@ -16,7 +16,7 @@ type PriorityNode struct {
 }
 
 // 负载均衡查询
-func (this *NodeApiBalance) GET(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     name := r.GetRequestString("name")
     if name == "" {
         w.ResponseJson(0, "incomplete input: name is required", nil)

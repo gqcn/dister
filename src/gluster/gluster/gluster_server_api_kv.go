@@ -10,7 +10,7 @@ import (
 
 
 // K-V 查询
-func (this *NodeApiKv) GET(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiKv) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     k := r.GetRequestString("k")
     if k == "" {
         if this.node.DataMap.Size() > 100 {
@@ -28,12 +28,12 @@ func (this *NodeApiKv) GET(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
 }
 
 // K-V 新增
-func (this *NodeApiKv) PUT(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    this.POST(r, w)
+func (this *NodeApiKv) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+    this.Post(r, w)
 }
 
 // K-V 修改
-func (this *NodeApiKv) POST(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiKv) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     items := make(map[string]string)
     err   := gjson.DecodeTo(r.GetRaw(), &items)
     if err != nil {
@@ -54,7 +54,7 @@ func (this *NodeApiKv) POST(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
 }
 
 // K-V 删除
-func (this *NodeApiKv) DELETE(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiKv) Delete(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {

@@ -9,17 +9,17 @@ import (
 )
 
 // 查询Peers
-func (this *NodeApiNode) GET(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiNode) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     w.ResponseJson(1, "ok", *this.node.getAllPeers())
 }
 
 // 新增Peer
-func (this *NodeApiNode) PUT(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    this.POST(r, w)
+func (this *NodeApiNode) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+    this.Post(r, w)
 }
 
 // 修改Peer
-func (this *NodeApiNode) POST(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiNode) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {
@@ -35,7 +35,7 @@ func (this *NodeApiNode) POST(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
 }
 
 // 删除Peer
-func (this *NodeApiNode) DELETE(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiNode) Delete(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {
