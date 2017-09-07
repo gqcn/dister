@@ -3,7 +3,7 @@
     已解决split brains造成的数据一致性问题：
         经典分区多节点脑裂问题：出现两个及以上的分区网络，网络之间无法相互连接
         复杂非分区三点脑裂问题：A-B-C，AC之间无法相互连接（B是双网卡），这样会造成A、C为leader，B为follower
-        以上需要解决的是数据一致性问题，解决方案：检测集群必需为环形网络，剔除掉非环形网络的节点
+        以上需要解决的是数据一致性问题，解决方案：检测集群各节点需要相互能够连通，剔除不连通的节点（例如星型拓扑结构的节点）
  */
 
 package gluster
@@ -343,7 +343,7 @@ func RecieveMsg(conn net.Conn) *Msg {
         var msg Msg
         err := json.Unmarshal(data, &msg)
         if err != nil {
-            glog.Println("receive msg parse err:", err)
+            glog.Error("receive msg parse err:", err)
             return nil
         }
         if msg.Info.Ip == "127.0.0.1" || msg.Info.Ip == "" {
@@ -363,7 +363,7 @@ func SendMsg(conn net.Conn, head int, body string) error {
     }
     s, err := json.Marshal(msg)
     if err != nil {
-        glog.Println("send msg parse err:", err)
+        glog.Error("send msg parse err:", err)
         return err
     }
     return Send(conn, s)

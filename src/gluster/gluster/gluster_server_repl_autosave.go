@@ -118,7 +118,7 @@ func (n *Node) updateFromLogEntriesJson(jsonContent string) error {
     array := make([]LogEntry, 0)
     err   := gjson.DecodeTo(jsonContent, &array)
     if err != nil {
-        glog.Println(err)
+        glog.Error(err)
         return err
     }
     if array != nil && len(array) > 0 {

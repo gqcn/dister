@@ -7,7 +7,6 @@ import (
     "g/encoding/gjson"
     "time"
     "g/core/types/gset"
-    "g/os/glog"
 )
 
 // leader到其他节点的数据同步监听
@@ -111,7 +110,7 @@ func (n *Node) autoCleanLogList() {
                     t := p.Prev()
                     n.LogList.Remove(p)
                     p  = t
-                    glog.Println("clean log id:", entry.Id, "now log list len:", n.LogList.Len())
+                    //glog.Println("clean log id:", entry.Id, "now log list len:", n.LogList.Len())
                 } else {
                     break;
                 }

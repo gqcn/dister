@@ -8,7 +8,6 @@ import (
     "g/database/gdb"
     "g/net/ghttp"
     "g/core/types/gmap"
-    "g/os/glog"
     "fmt"
     "strconv"
     "g/os/gcache"
@@ -93,7 +92,7 @@ func (n *Node) checkServiceHealth(service *Service) {
             nstatus := m.Get("status")
             if ostatus != nstatus {
                 (*u) = true
-                glog.Printf("service updated, node: %s, from %v to %v, name: %s, \n", name, ostatus, nstatus, service.Name)
+                //glog.Printf("service updated, node: %s, from %v to %v, name: %s, \n", name, ostatus, nstatus, service.Name)
             }
             interval := m.Get("interval")
             timeout  := int64(gSERVICE_HEALTH_CHECK_INTERVAL)

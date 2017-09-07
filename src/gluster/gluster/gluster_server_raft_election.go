@@ -27,7 +27,7 @@ func (n *Node) electionHandler() {
                     n.setRaftRole(gROLE_RAFT_LEADER)
                 }
             } else {
-                glog.Println("no meet the least nodes count:", n.MinNode, ", current:", n.Peers.Size() + 1)
+                glog.Warning("no meet the least nodes count:", n.MinNode, ", current:", n.Peers.Size() + 1)
             }
             n.updateElectionDeadline()
         }
@@ -64,7 +64,7 @@ func (n *Node) beginScore() {
                 return
             }
             if err := n.sendMsg(conn, gMSG_RAFT_SCORE_REQUEST, ""); err != nil {
-                glog.Println(err)
+                glog.Error(err)
                 return
             }
             msg := n.receiveMsg(conn)
@@ -120,7 +120,7 @@ func (n *Node) beginScore() {
             }
             defer conn.Close()
             if err := n.sendMsg(conn, gMSG_RAFT_SCORE_COMPARE_REQUEST, ""); err != nil {
-                glog.Println(err)
+                glog.Error(err)
                 return
             }
             msg := n.receiveMsg(conn)

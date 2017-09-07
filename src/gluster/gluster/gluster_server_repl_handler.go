@@ -214,7 +214,7 @@ func (n *Node) onMsgReplUpdate(conn net.Conn, msg *Msg) {
 func (n *Node) saveLogEntry(entry LogEntry) {
     lastLogId := n.getLastLogId()
     if entry.Id < lastLogId {
-        glog.Printf("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId)
+        glog.Warning("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId)
         return
     }
     switch entry.Act {

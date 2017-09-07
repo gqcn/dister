@@ -41,7 +41,7 @@ func (n *Node) sendMsg(conn net.Conn, head int, body string) error {
     info.Ip = ip
     s, err := json.Marshal(Msg { head, body, *info })
     if err != nil {
-        glog.Println("send msg parse err:", err)
+        glog.Error("send msg parse err:", err)
         return err
     }
     return n.send(conn, s)
@@ -101,9 +101,6 @@ func (n *Node) Run() {
     go n.logAutoSavingHandler()
     // 服务健康检查
     go n.serviceHealthCheckHandler()
-
-    // 测试
-    //go n.show()
 }
 
 // 读取配置文件内容
@@ -186,11 +183,11 @@ func (n *Node) replicateConfigToLeader() {
         if n.getRaftRole() != gROLE_RAFT_LEADER {
             if n.getLeader() != nil {
                 if gfile.Exists(n.CfgFilePath) {
-                    glog.Println("replicate config to leader")
+                    //glog.Println("replicate config to leader")
                     err := n.SendToLeader(gMSG_REPL_CONFIG_FROM_FOLLOWER, gPORT_REPL, gfile.GetContents(n.CfgFilePath))
                     if err == nil {
                         n.CfgReplicated = true
-                        glog.Println("replicate config to leader, done")
+                        //glog.Println("replicate config to leader, done")
                     } else {
                         glog.Error(err)
                     }
@@ -203,15 +200,6 @@ func (n *Node) replicateConfigToLeader() {
         }
         time.Sleep(100 * time.Millisecond)
     }
-}
-
-// (测试使用)展示当前节点通信的主机列表
-func (n *Node) show() {
-    gtime.SetInterval(1 * time.Second, func() bool{
-        //glog.Println(n.Ip + ":", n.getScoreCount(), n.getScore(), n.getLeader(), n.getRaftRole())
-        glog.Println(n.getLastLogId(), n.getLastServiceLogId())
-        return true
-    })
 }
 
 // 获取当前节点的信息
