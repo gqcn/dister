@@ -10,6 +10,7 @@ import (
     "g/util/gtime"
     "g/os/glog"
     "sync"
+    "fmt"
 )
 
 // 集群数据同步接口回调函数
@@ -123,7 +124,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
         var items interface{}
         if gjson.DecodeTo(msg.Body, &items) == nil {
             var entry = LogEntry {
-                Id    : gtime.Microsecond(),
+                Id    : gtime.Nanosecond(),
                 Act   : msg.Head,
                 Items : items,
             }
