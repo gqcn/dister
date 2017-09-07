@@ -14,20 +14,15 @@ func (n *Node) electionHandler() {
     n.updateElectionDeadline()
     for {
         if n.Role == gROLE_SERVER && n.getRaftRole() != gROLE_RAFT_LEADER && gtime.Millisecond() >= n.getElectionDeadline() {
-            // 使用MinNode变量控制最小节点数(这里判断的时候要去除自身的数量)
-            if n.Peers.Size() >= n.MinNode - 1 {
-                if n.Peers.Size() > 0 {
-                    // 集群是2个节点及以上
-                    n.resetAsCandidate()
-                    n.beginScore()
-                } else {
-                    // 集群目前仅有1个节点
-                    glog.Println("only one node in this cluster, i'll be the leader")
-                    n.setLeader(n.getNodeInfo())
-                    n.setRaftRole(gROLE_RAFT_LEADER)
-                }
+            if n.Peers.Size() > 0 {
+                // 集群是2个节点及以上
+                n.resetAsCandidate()
+                n.beginScore()
             } else {
-                glog.Warning("no meet the least nodes count:", n.MinNode, ", current:", n.Peers.Size() + 1)
+                // 集群目前仅有1个节点
+                glog.Println("only one node in this cluster, i'll be the leader")
+                n.setLeader(n.getNodeInfo())
+                n.setRaftRole(gROLE_RAFT_LEADER)
             }
             n.updateElectionDeadline()
         }
@@ -90,10 +85,11 @@ func (n *Node) beginScore() {
     }
     wg.Wait()
 
-    // 必需要获得多数派比分（以保证能够连通绝大部分的节点）才能满足leader的基础条件
-    if n.getScoreCount() < n.Peers.Size() {
+    // 必需要获得多数派(n/2+1)比分（以保证能够连通绝大部分的节点）才能满足leader的基础条件
+    // 注意这里的ScoreCount和n.Peers.Size都不包含自身
+    if (n.getScoreCount() + 1) < int((n.Peers.Size() + 1)/2) + 1 {
         n.updateElectionDeadline()
-        //glog.Println("election failed: could not reach major of the nodes")
+        glog.Println("election failed: could not reach major of the nodes")
         return
     }
 

@@ -288,12 +288,6 @@ func (n *Node) sayHiToLocalLan() {
 // 与远程节点对比谁可以成为leader，返回true表示自己，false表示对方节点
 // 需要同时对比日志信息及选举比分
 func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
-    if info.RaftRole != gROLE_RAFT_LEADER {
-        return true
-    }
-    if n.getRaftRole() != gROLE_RAFT_LEADER {
-        return false;
-    }
     result := false
     if n.getLogCount() > info.LogCount && n.getLastLogId() > info.LastLogId {
         result = true
@@ -448,16 +442,6 @@ func (n *Node) resetAsCandidate() {
     n.mutex.Unlock()
 }
 
-// 重置为选民，并清空选票信息
-func (n *Node) resetAsFollower() {
-    n.mutex.Lock()
-    n.RaftRole   = gROLE_RAFT_FOLLOWER
-    n.Leader     = nil
-    n.Score      = 0
-    n.ScoreCount = 0
-    n.mutex.Unlock()
-}
-
 func (n *Node) setIp(ip string) {
     n.mutex.Lock()
     n.Ip = ip
@@ -467,7 +451,7 @@ func (n *Node) setIp(ip string) {
 func (n *Node) setRaftRole(role int) {
     n.mutex.Lock()
     if n.RaftRole != role {
-        glog.Printf("role changed from %s to %s\n", n.raftRoleName(n.RaftRole), n.raftRoleName(role))
+        glog.Printf("role changed from %s to %s\n", raftRoleName(n.RaftRole), raftRoleName(role))
     }
     n.RaftRole = role
     n.mutex.Unlock()
@@ -590,13 +574,5 @@ func (n *Node) updateElectionDeadline() {
     n.mutex.Unlock()
 }
 
-// 将RAFT角色字段转换为可读的字符串
-func (n *Node) raftRoleName(role int) string {
-    switch role {
-        case gROLE_RAFT_FOLLOWER:  return "follower"
-        case gROLE_RAFT_CANDIDATE: return "candidate"
-        case gROLE_RAFT_LEADER:    return "leader"
-    }
-    return "unknown"
-}
+
 

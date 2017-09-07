@@ -10,7 +10,6 @@ import (
     "g/util/gtime"
     "g/os/glog"
     "sync"
-    "fmt"
 )
 
 // 集群数据同步接口回调函数

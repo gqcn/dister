@@ -7,6 +7,5 @@
                      // 0:server,  参与RAFT选举，可以成为leader，也可以成为follower，一个集群至少需要一个server，
                      // 1:client,  (可选)客户端角色不参与选举，只能为follower，从leader同步数据，
                      // 默认值为：0
-    "MinNode"  : 1,  // (可选)组成gluster的最小节点数量，默认为1，常见集群一般为3
     "Peers"    : []  // (可选)初始化节点列表，包含自定义的所需添加的服务器IP或者域名列表
 }

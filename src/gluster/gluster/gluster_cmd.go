@@ -17,7 +17,22 @@ func cmd_getnode () {
         return
     }
     defer r.Close()
-    fmt.Println(r.ReadAll())
+    content := r.ReadAll()
+    peers   := make([]NodeInfo, 0)
+    jsonvar := gjson.DecodeToJson(content)
+    err := jsonvar.GetToVar("data", &peers)
+    if err != nil {
+        fmt.Println(err)
+    } else {
+        fmt.Printf("%32s %30s %15s %12s %10s\n", "Name", "Group", "Ip", "Role", "Status")
+        for _,v := range peers {
+            status := "alive"
+            if v.Status == 0 {
+                status = "dead"
+            }
+            fmt.Printf("%32s %30s %15s %12s %10s\n", v.Name, v.Group, v.Ip, raftRoleName(v.RaftRole), status)
+        }
+    }
 }
 
 // 添加集群节点
