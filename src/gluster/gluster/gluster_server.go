@@ -65,12 +65,21 @@ func (n *Node) Run() {
         os.Exit(0)
         return
     }
-    // 显示当前节点信息
-    glog.Println("Host Id  :", n.Id)
-    glog.Println("Host Name:", n.Name)
 
     // 读取配置文件
     n.initFromCfg()
+
+    // 读取命令行参数
+    n.initFromCommand()
+
+    // 显示当前节点信息
+    fmt.Printf( "gluster version %s, start running...\n", gVERSION)
+    fmt.Println("============================================")
+    fmt.Println("Host Id   :", n.Id)
+    fmt.Println("Host Role :", roleName(n.Role))
+    fmt.Println("Host Name :", n.Name)
+    fmt.Println("Host Group:", n.Group)
+    fmt.Println("============================================")
 
     // 初始化节点数据
     n.restoreDataFromFile()
@@ -104,7 +113,49 @@ func (n *Node) Run() {
     go n.serviceHealthCheckHandler()
 }
 
-// 读取配置文件内容
+// 从命令行读取配置文件内容
+func (n *Node) initFromCommand() {
+    // 集群名称
+    group := gconsole.Option.Get("Group")
+    if group != "" {
+        n.setGroup(group)
+    }
+    // 集群角色
+    role := gconsole.Option.GetInt("Role")
+    if role < 0 || role > 2 {
+        glog.Fatalln("invalid role setting, exit")
+    } else {
+        n.setRole(role)
+    }
+    // 数据保存路径(请保证运行gcluster的用户有权限写入)
+    savepath := gconsole.Option.Get("SavePath")
+    if savepath != "" {
+        n.setSavePathFromConfig(savepath)
+    }
+    // 日志保存路径
+    logpath := gconsole.Option.Get("LogPath")
+    if logpath != "" {
+        n.setLogPathFromConfig(logpath)
+    }
+    // (可选)节点地址IP或者域名
+    ip := gconsole.Option.Get("Ip")
+    if ip != "" {
+        n.setIp(ip)
+    }
+    // (可选)节点地址IP或者域名
+    minNode := gconsole.Option.GetInt("MinNode")
+    if minNode != 0 {
+        n.setMinNode(minNode)
+    }
+    // (可选)初始化节点列表，包含自定义的所需添加的服务器IP或者域名列表
+    peerstr := gconsole.Option.Get("Peers")
+    if peerstr != "" {
+        peers := strings.Split(strings.TrimSpace(peerstr), ",")
+        n.setPeersFromConfig(peers)
+    }
+}
+
+// 从配置文件读取配置文件内容
 func (n *Node) initFromCfg() {
     // 获取命令行指定的配置文件路径，如果不存在，那么使用默认路径的配置文件
     // 默认路径为gcluster执行文件的同一目录下的gluster.json文件
@@ -128,53 +179,82 @@ func (n *Node) initFromCfg() {
     }
     glog.Println("initializing from", cfgpath)
     // 集群名称
-    n.Group = j.GetString("Group")
+    group := j.GetString("Group")
+    if group != "" {
+        n.setGroup(group)
+    }
     // 集群角色
-    n.Role  = j.GetInt("Role")
-    if n.Role < 0 || n.Role > 2 {
+    role := j.GetInt("Role")
+    if role < 0 || role > 2 {
         glog.Fatalln("invalid role setting, exit")
+    } else {
+        n.setRole(role)
     }
     // 数据保存路径(请保证运行gcluster的用户有权限写入)
     savepath := j.GetString("SavePath")
     if savepath != "" {
-        if !gfile.Exists(savepath) {
-            gfile.Mkdir(savepath)
-        }
-        if !gfile.IsWritable(savepath) {
-            glog.Fatalln(savepath, "is not writable for saving data")
-        }
-        n.SetSavePath(strings.TrimRight(savepath, gfile.Separator))
+        n.setSavePathFromConfig(savepath)
     }
     // 日志保存路径
     logpath := j.GetString("LogPath")
     if logpath != "" {
-        if !gfile.Exists(logpath) {
-            gfile.Mkdir(logpath)
-        }
-        if !gfile.IsWritable(logpath) {
-            glog.Fatalln(logpath, "is not writable for saving log")
-        }
-        glog.SetLogPath(logpath)
+        n.setLogPathFromConfig(logpath)
     }
     // (可选)节点地址IP或者域名
-    address := j.GetString("Address")
-    if address != "" {
-        n.setIp(address)
+    ip := j.GetString("Ip")
+    if ip != "" {
+        n.setIp(ip)
+    }
+    // (可选)节点地址IP或者域名
+    minNode := j.GetInt("MinNode")
+    if minNode != 0 {
+        n.setMinNode(minNode)
     }
     // (可选)初始化节点列表，包含自定义的所需添加的服务器IP或者域名列表
-    peers := j.GetArray("Peers")
-    if peers != nil {
-        for _, v := range peers {
-            ip := v.(string)
-            if ip == n.Ip {
-                continue
-            }
-            go func(ip string) {
-                if !n.sayHi(ip) {
-                    n.updatePeerInfo(NodeInfo{Id: ip, Ip: ip})
-                }
-            }(ip)
+    params := j.GetArray("Peers")
+    if params != nil {
+        peers := make([]string, 0)
+        for _, v := range params {
+            peers = append(peers, v.(string))
         }
+        n.setPeersFromConfig(peers)
+    }
+}
+
+// 从配置中设置SavePath
+func (n *Node) setSavePathFromConfig(savepath string) {
+    if !gfile.Exists(savepath) {
+        gfile.Mkdir(savepath)
+    }
+    if !gfile.IsWritable(savepath) {
+        glog.Fatalln(savepath, "is not writable for saving data")
+    }
+    n.SetSavePath(strings.TrimRight(savepath, gfile.Separator))
+}
+
+// 从配置中设置LogPath
+func (n *Node) setLogPathFromConfig(logpath string) {
+    if !gfile.Exists(logpath) {
+        gfile.Mkdir(logpath)
+    }
+    if !gfile.IsWritable(logpath) {
+        glog.Fatalln(logpath, "is not writable for saving log")
+    }
+    glog.SetLogPath(logpath)
+}
+
+// 从配置中设置Peers
+func (n *Node) setPeersFromConfig(peers []string) {
+    ip := n.getIp()
+    for _, v := range peers {
+        if v == ip {
+            continue
+        }
+        go func(ip string) {
+            if !n.sayHi(ip) {
+                n.updatePeerInfo(NodeInfo{Id: ip, Ip: ip})
+            }
+        }(v)
     }
 }
 
@@ -325,6 +405,13 @@ func (n *Node) getAllPeers() *[]NodeInfo{
     return &list
 }
 
+func (n *Node) getId() string {
+    n.mutex.RLock()
+    r := n.Id
+    n.mutex.RUnlock()
+    return r
+}
+
 func (n *Node) getIp() string {
     n.mutex.RLock()
     r := n.Ip
@@ -442,10 +529,29 @@ func (n *Node) resetAsCandidate() {
     n.mutex.Unlock()
 }
 
+func (n *Node) setGroup(group string) {
+    n.mutex.Lock()
+    n.Group = group
+    n.mutex.Unlock()
+}
+
 func (n *Node) setIp(ip string) {
     n.mutex.Lock()
     n.Ip = ip
     n.mutex.Unlock()
+}
+
+func (n *Node) setMinNode(count int) {
+    n.mutex.Lock()
+    n.MinNode = count
+    n.mutex.Unlock()
+}
+
+func (n *Node) setRole(role int) {
+    n.mutex.Lock()
+    n.Role = role
+    n.mutex.Unlock()
+
 }
 
 func (n *Node) setRaftRole(role int) {

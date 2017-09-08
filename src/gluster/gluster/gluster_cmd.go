@@ -10,10 +10,10 @@ import (
 )
 
 // 查看集群节点
-func cmd_getnode () {
+func cmd_nodes () {
     r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API))
     if r == nil {
-        fmt.Println("connect to local gluster api failed")
+        fmt.Println("ERROR: connect to local gluster api failed")
         return
     }
     defer r.Close()
@@ -50,7 +50,7 @@ func cmd_addnode () {
         if len(params) > 0 {
             r := ghttp.Post(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API), gjson.Encode(params))
             if r == nil {
-                fmt.Println("connect to local gluster api failed")
+                fmt.Println("ERROR: connect to local gluster api failed")
                 return
             }
             defer r.Close()
@@ -80,7 +80,7 @@ func cmd_delnode () {
         if len(params) > 0 {
             r := ghttp.Delete(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API), gjson.Encode(params))
             if r == nil {
-                fmt.Println("connect to local gluster api failed")
+                fmt.Println("ERROR: connect to local gluster api failed")
                 return
             }
             defer r.Close()
@@ -98,11 +98,11 @@ func cmd_delnode () {
 // 查询kv
 // 查看所有键值数据：gluster
 // 查看指定键名数据：gluster 键名
-func cmd_getkv () {
+func cmd_kvs () {
     k := gconsole.Value.Get(2)
     r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/kv?k=%s", gPORT_API, k))
     if r == nil {
-        fmt.Println("connect to local gluster api failed")
+        fmt.Println("ERROR: connect to local gluster api failed")
         return
     }
     defer r.Close()
@@ -118,14 +118,14 @@ func cmd_addkv () {
         m := map[string]string{k: v}
         r := ghttp.Post(fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API), gjson.Encode(m))
         if r == nil {
-            fmt.Println("connect to local gluster api failed")
+            fmt.Println("ERROR: connect to local gluster api failed")
             return
         }
         defer r.Close()
         content := r.ReadAll()
         data    := gjson.DecodeToJson(content)
         if data.GetInt("result") != 1 {
-            fmt.Println(data.GetString("message"))
+            fmt.Println("ERROR: " + data.GetString("message"))
             return
         }
     }
@@ -147,14 +147,14 @@ func cmd_delkv () {
         if len(params) > 0 {
             r := ghttp.Delete(fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API), gjson.Encode(params))
             if r == nil {
-                fmt.Println("connect to local gluster api failed")
+                fmt.Println("ERROR: connect to local gluster api failed")
                 return
             }
             defer r.Close()
             content := r.ReadAll()
             data    := gjson.DecodeToJson(content)
             if data.GetInt("result") != 1 {
-                fmt.Println(data.GetString("message"))
+                fmt.Println("ERROR: " + data.GetString("message"))
                 return
             }
         }
@@ -164,11 +164,11 @@ func cmd_delkv () {
 
 // 查看Service
 // 使用方式：gluster getservice [Service名称]
-func cmd_getservice () {
+func cmd_services () {
     name := gconsole.Value.Get(2)
     r    := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/service?name=%s", gPORT_API, name))
     if r == nil {
-        fmt.Println("connect to local gluster api failed")
+        fmt.Println("ERROR: connect to local gluster api failed")
         return
     }
     defer r.Close()
@@ -189,14 +189,14 @@ func cmd_addservice () {
     }
     r := ghttp.Post(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API), gfile.GetContents(path))
     if r == nil {
-        fmt.Println("connect to local gluster api failed")
+        fmt.Println("ERROR: connect to local gluster api failed")
         return
     }
     defer r.Close()
     content := r.ReadAll()
     data    := gjson.DecodeToJson(content)
     if data.GetInt("result") != 1 {
-        fmt.Println(data.GetString("message"))
+        fmt.Println("ERROR: " + data.GetString("message"))
         return
     }
     fmt.Println("ok")
@@ -217,14 +217,14 @@ func cmd_delservice () {
         if len(params) > 0 {
             r := ghttp.Delete(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API), gjson.Encode(params))
             if r == nil {
-                fmt.Println("connect to local gluster api failed")
+                fmt.Println("ERROR: connect to local gluster api failed")
                 return
             }
             defer r.Close()
             content := r.ReadAll()
             data    := gjson.DecodeToJson(content)
             if data.GetInt("result") != 1 {
-                fmt.Println(data.GetString("message"))
+                fmt.Println("ERROR: " + data.GetString("message"))
                 return
             }
         }

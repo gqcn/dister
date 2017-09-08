@@ -61,15 +61,17 @@ func (n *Node) onMsgConfigFromFollower(conn net.Conn, msg *Msg) {
     //glog.Println("config replication from", msg.Info.Name, "done")
 }
 
-// Peers信息更新
+// Leader同步Peers信息到Follower
 func (n *Node) onMsgPeersUpdate(conn net.Conn, msg *Msg) {
     //glog.Println("receive peers update", msg.Body)
-    m := make([]NodeInfo, 0)
+    m  := make([]NodeInfo, 0)
+    id := n.getId()
+    ip := n.getIp()
     if gjson.DecodeTo(msg.Body, &m) == nil {
         for _, v := range m {
-            if v.Id != n.Id {
+            if v.Id != id {
                 n.updatePeerInfo(v)
-            } else {
+            } else if v.Ip != ip {
                 n.setIp(v.Ip)
             }
         }

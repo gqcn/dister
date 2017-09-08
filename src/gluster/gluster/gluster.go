@@ -125,6 +125,7 @@ type Node struct {
     Role                int                      // 集群角色
     RaftRole            int                      // RAFT角色
     Leader              *NodeInfo                // Leader节点信息
+    MinNode             int                      // 最小节点数
     Score               int64                    // 选举比分
     ScoreCount          int                      // 选举比分的节点数
     ElectionDeadline    int64                    // 选举超时时间点
@@ -234,9 +235,11 @@ func NewServer() *Node {
         Id                  : nodeId(),
         Ip                  : "127.0.0.1",
         Name                : hostname,
+        Group               : "default.group.gluster",
         Role                : gROLE_SERVER,
         RaftRole            : gROLE_RAFT_FOLLOWER,
         Leader              : nil,
+        MinNode             : 2,
         Peers               : gmap.NewStringInterfaceMap(),
         SavePath            : gfile.SelfDir(),
         FileName            : "gluster.db",
@@ -251,13 +254,13 @@ func NewServer() *Node {
         node.Ip = ips[0]
     }
     // 命令行操作绑定
-    gconsole.BindHandle("getnode",    cmd_getnode)
+    gconsole.BindHandle("nodes",      cmd_nodes)
     gconsole.BindHandle("addnode",    cmd_addnode)
     gconsole.BindHandle("delnode",    cmd_delnode)
-    gconsole.BindHandle("getkv",      cmd_getkv)
+    gconsole.BindHandle("kvs",        cmd_kvs)
     gconsole.BindHandle("addkv",      cmd_addkv)
     gconsole.BindHandle("delkv",      cmd_delkv)
-    gconsole.BindHandle("getservice", cmd_getservice)
+    gconsole.BindHandle("services",   cmd_services)
     gconsole.BindHandle("addservice", cmd_addservice)
     gconsole.BindHandle("delservice", cmd_delservice)
 
@@ -368,12 +371,22 @@ func SendMsg(conn net.Conn, head int, body string) error {
     return Send(conn, s)
 }
 
+// 将集群角色字段转换为可读的字符串
+func roleName(role int) string {
+    switch role {
+        case gROLE_CLIENT:  return "client"
+        case gROLE_SERVER:  return "server"
+        case gROLE_MONITOR: return "monitor"
+    }
+    return "unknown"
+}
+
 // 将RAFT角色字段转换为可读的字符串
 func raftRoleName(role int) string {
     switch role {
-    case gROLE_RAFT_FOLLOWER:  return "follower"
-    case gROLE_RAFT_CANDIDATE: return "candidate"
-    case gROLE_RAFT_LEADER:    return "leader"
+        case gROLE_RAFT_FOLLOWER:  return "follower"
+        case gROLE_RAFT_CANDIDATE: return "candidate"
+        case gROLE_RAFT_LEADER:    return "leader"
     }
     return "unknown"
 }
