@@ -25,23 +25,22 @@ func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
         k := "gluster_service_balance_name_" + name
         r := gcache.Get(k)
         if r == nil {
-            r, err := this.getAliveServiceByPriority(name)
+            result, err := this.getAliveServiceByPriority(name)
             if err != nil {
                 w.ResponseJson(0, err.Error(), nil)
             } else {
-                gcache.Set(k, r, 1)
-                w.ResponseJson(0, "ok", r)
+                gcache.Set(k, result, 1)
+                r = result
             }
-        } else {
-            w.ResponseJson(0, "ok", r)
         }
+        w.ResponseJson(1, "ok", r)
     }
 }
 
 // 查询存货的service, 并根据priority计算负载均衡，取出一条返回
 func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}, error) {
     if !this.node.ServiceForApi.Contains(name) {
-        return nil, errors.New(fmt.Sprintf("no service named '%s' found", name))
+        return nil, errors.New(fmt.Sprintf("no service named '%s'", name))
     }
     st   := this.node.ServiceForApi.Get(name).(ServiceStruct)
     list := make([]PriorityNode, 0)
@@ -61,7 +60,7 @@ func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}
         }
     }
     if len(list) < 1 {
-        return nil, errors.New("no nodes are alive")
+        return nil, errors.New("service does not support balance, or no nodes in this service are alive")
     }
     nodename := this.getServiceByPriority(list)
     if nodename == "" {

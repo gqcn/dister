@@ -37,12 +37,16 @@ import (
 func (this *NodeApiService) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     name := r.GetRequestString("name")
     if name == "" {
-        w.ResponseJson(1, "ok", *this.node.ServiceForApi.Clone())
+        if this.node.ServiceForApi.Size() > 100 {
+            w.ResponseJson(0, "too large service size, need a service name to search", nil)
+        } else {
+            w.ResponseJson(1, "ok", *this.node.ServiceForApi.Clone())
+        }
     } else {
         if this.node.Service.Contains(name) {
             w.ResponseJson(1, "ok", this.node.ServiceForApi.Get(name))
         } else {
-            w.ResponseJson(1, "ok", nil)
+            w.ResponseJson(0, "service not found", nil)
         }
     }
 }

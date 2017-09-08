@@ -77,7 +77,7 @@ func (n *Node) Run() {
 
     // 显示当前节点信息
     fmt.Printf( "gluster version %s, start running...\n", gVERSION)
-    fmt.Println("================================================")
+    fmt.Println("===============================================================================")
     fmt.Println("Host Id       :", n.Id)
     fmt.Println("Host Role     :", roleName(n.Role))
     fmt.Println("Host Name     :", n.Name)
@@ -85,7 +85,7 @@ func (n *Node) Run() {
     fmt.Println("Host LogPath  :", glog.GetLogPath())
     fmt.Println("Host SavePath :", n.SavePath)
     fmt.Println("Group MinNode :", n.MinNode)
-    fmt.Println("================================================")
+    fmt.Println("===============================================================================")
 
     // 创建接口监听
     go gtcp.NewServer(fmt.Sprintf(":%d", gPORT_RAFT),  n.raftTcpHandler).Run()

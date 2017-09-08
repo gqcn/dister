@@ -7,6 +7,7 @@ import (
     "g/net/ghttp"
     "g/encoding/gjson"
     "g/os/gfile"
+    "encoding/json"
 )
 
 // 查看集群节点
@@ -105,7 +106,16 @@ func cmd_kvs () {
         return
     }
     defer r.Close()
-    fmt.Println(r.ReadAll())
+    content := r.ReadAll()
+    data    := gjson.DecodeToJson(content)
+    if data.GetInt("result") != 1 {
+        fmt.Println("ERROR: " + data.GetString("message"))
+        return
+    }
+    fmt.Printf("%32s : %s\n", "K", "V")
+    for k, v := range data.GetMap("data") {
+        fmt.Printf("%32.32s : %.100s\n", k, v)
+    }
 }
 
 
@@ -119,7 +129,13 @@ func cmd_getkv () {
         return
     }
     defer r.Close()
-    fmt.Println(r.ReadAll())
+    content := r.ReadAll()
+    data    := gjson.DecodeToJson(content)
+    if data.GetInt("result") != 1 {
+        fmt.Println("ERROR: " + data.GetString("message"))
+        return
+    }
+    fmt.Println(data.GetString("data"))
 }
 
 // 设置kv
@@ -184,7 +200,17 @@ func cmd_services () {
         return
     }
     defer r.Close()
-    fmt.Println(r.ReadAll())
+    content := r.ReadAll()
+    data    := gjson.DecodeToJson(content)
+    if data.GetInt("result") != 1 {
+        fmt.Println("ERROR: " + data.GetString("message"))
+        return
+    }
+    services := data.GetMap("data")
+    if services != nil {
+        s, _ := json.MarshalIndent(services, "", "    ")
+        fmt.Println(string(s))
+    }
 }
 
 // 查看Service
@@ -197,7 +223,17 @@ func cmd_getservice () {
         return
     }
     defer r.Close()
-    fmt.Println(r.ReadAll())
+    content := r.ReadAll()
+    data    := gjson.DecodeToJson(content)
+    if data.GetInt("result") != 1 {
+        fmt.Println("ERROR: " + data.GetString("message"))
+        return
+    }
+    service := data.GetMap("data")
+    if service != nil {
+        s, _ := json.MarshalIndent(service, "", "    ")
+        fmt.Println(string(s))
+    }
 }
 
 // 添加Service
@@ -255,4 +291,28 @@ func cmd_delservice () {
         }
     }
     fmt.Println("ok")
+}
+
+
+// 负载均衡查询
+// 使用方式：gluster balance Service名称
+func cmd_balance () {
+    name := gconsole.Value.Get(2)
+    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/balance?name=%s", gPORT_API, name))
+    if r == nil {
+        fmt.Println("ERROR: connect to local gluster api failed")
+        return
+    }
+    defer r.Close()
+    content := r.ReadAll()
+    data    := gjson.DecodeToJson(content)
+    if data.GetInt("result") != 1 {
+        fmt.Println("ERROR: " + data.GetString("message"))
+        return
+    }
+    service := data.GetMap("data")
+    if service != nil {
+        s, _ := json.MarshalIndent(service, "", "    ")
+        fmt.Println(string(s))
+    }
 }

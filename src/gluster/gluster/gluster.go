@@ -263,6 +263,7 @@ func NewServer() *Node {
     gconsole.BindHandle("getservice", cmd_getservice)
     gconsole.BindHandle("addservice", cmd_addservice)
     gconsole.BindHandle("delservice", cmd_delservice)
+    gconsole.BindHandle("balance",    cmd_balance)
 
     return &node
 }

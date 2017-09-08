@@ -22,7 +22,7 @@ func (this *NodeApiKv) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
         if this.node.DataMap.Contains(k) {
             w.ResponseJson(1, "ok", this.node.DataMap.Get(k))
         } else {
-            w.ResponseJson(0, "ok", nil)
+            w.ResponseJson(0, "data not found", nil)
         }
     }
 }
