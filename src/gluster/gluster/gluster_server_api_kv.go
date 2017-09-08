@@ -13,7 +13,7 @@ import (
 func (this *NodeApiKv) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     k := r.GetRequestString("k")
     if k == "" {
-        if this.node.DataMap.Size() > 100 {
+        if this.node.DataMap.Size() > 1000 {
             w.ResponseJson(0, "too large data size, need a key to search", nil)
         } else {
             w.ResponseJson(1, "ok", *this.node.DataMap.Clone())
