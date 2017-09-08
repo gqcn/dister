@@ -13,10 +13,12 @@ import (
 func (n *Node) replicationHandler() {
     // 初始化数据同步心跳检测
     go n.dataReplicationLoop()
-    // 日志自动清理
-    go n.autoCleanLogList()
+
     // Peers自动同步
     go n.peersReplicationLoop()
+
+    // 日志自动清理
+    go n.autoCleanLogList()
 }
 
 // 日志自动同步检查，类似心跳
@@ -88,32 +90,30 @@ func (n *Node) peersReplicationLoop() {
     }
 }
 
-// 定期清理已经同步完毕的日志列表
+// 定期清理已经同步完毕的日志列表，注意：***leader和follower都需要清理***
 // 获取所有已存活的节点的最小日志ID，清理本地日志列表中比该ID小的记录
 func (n *Node) autoCleanLogList() {
     for {
         time.Sleep(gLOG_REPL_LOGCLEAN_INTERVAL * time.Millisecond)
-        if n.getRaftRole() == gROLE_RAFT_LEADER {
-            match    := false
-            minLogId := n.getMinLogIdFromPeers()
-            if minLogId == 0 {
-                continue
+        match    := false
+        minLogId := n.getMinLogIdFromPeers()
+        if minLogId == 0 {
+            continue
+        }
+        p := n.LogList.Back()
+        for p != nil {
+            entry := p.Value.(LogEntry)
+            // 该minLogId必需在日志中存在完整匹配的日志
+            if !match && entry.Id == minLogId {
+                match = true
             }
-            p := n.LogList.Back()
-            for p != nil {
-                entry := p.Value.(LogEntry)
-                // 该minLogId必需在日志中存在完整匹配的日志
-                if !match && entry.Id == minLogId {
-                    match = true
-                }
-                if match && entry.Id <= minLogId {
-                    t := p.Prev()
-                    n.LogList.Remove(p)
-                    p  = t
-                    //glog.Println("clean log id:", entry.Id, "now log list len:", n.LogList.Len())
-                } else {
-                    break;
-                }
+            if match && entry.Id <= minLogId {
+                t := p.Prev()
+                n.LogList.Remove(p)
+                p  = t
+                //glog.Println("clean log id:", entry.Id, "now log list len:", n.LogList.Len())
+            } else {
+                break;
             }
         }
     }

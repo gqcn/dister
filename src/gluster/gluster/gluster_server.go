@@ -110,8 +110,8 @@ func (n *Node) Run() {
     go n.heartbeatHandler()
     // 日志同步处理
     go n.replicationHandler()
-    // 本地日志存储处理
-    go n.logAutoSavingHandler()
+    // 本地节点数据自动存储处理
+    go n.autoSavingHandler()
     // 服务健康检查
     go n.serviceHealthCheckHandler()
 }

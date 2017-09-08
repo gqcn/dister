@@ -13,7 +13,7 @@ import (
 )
 
 // 日志自动保存处理
-func (n *Node) logAutoSavingHandler() {
+func (n *Node) autoSavingHandler() {
     t := gtime.Millisecond()
     for {
         // 当日志列表的最新ID与保存的ID不相等，或者超过超时时间

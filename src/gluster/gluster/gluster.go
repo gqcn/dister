@@ -29,7 +29,7 @@ import (
 )
 
 const (
-    gVERSION                        = "0.6"   // 当前版本
+    gVERSION                        = "0.8"   // 当前版本
     gCOMPRESS_COMMUNICATION         = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                = false   // 是否在存储时压缩内容
     // 集群端口定义
@@ -61,7 +61,7 @@ const (
     gELECTION_TIMEOUT_HEARTBEAT     = 500     // (毫秒)RAFT Leader统治维持心跳间隔
     gLOG_REPL_TIMEOUT_HEARTBEAT     = 1000    // (毫秒)数据同步检测心跳间隔(数据包括kv数据及service数据)
     gLOG_REPL_AUTOSAVE_INTERVAL     = 1000    // (毫秒)数据自动物理化保存的间隔
-    gLOG_REPL_LOGCLEAN_INTERVAL     = 5000    // (毫秒)数据同步时的日志清理间隔
+    gLOG_REPL_LOGCLEAN_INTERVAL     = 60000   // (毫秒)数据同步时的日志清理间隔，默认60秒清理一次
     gLOG_REPL_PEERS_INTERVAL        = 3000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL  = 2000    // (毫秒)健康检查默认间隔
 
@@ -85,6 +85,7 @@ const (
     gMSG_REPL_INCREMENTAL_UPDATE            = 330
     gMSG_REPL_COMPLETELY_UPDATE             = 340
     gMSG_REPL_HEARTBEAT                     = 350
+    gMSG_REPL_FAILED                        = 355
     gMSG_REPL_RESPONSE                      = 360
     gMSG_REPL_PEERS_UPDATE                  = 370
     gMSG_REPL_NEED_UPDATE_LEADER            = 375

@@ -9,7 +9,8 @@ import (
     "g/core/types/gmap"
     "g/util/gtime"
     "g/os/glog"
-    "sync"
+    "sync/atomic"
+    "time"
 )
 
 // 集群数据同步接口回调函数
@@ -121,6 +122,7 @@ func (n *Node) onMsgReplDataRemove(conn net.Conn, msg *Msg) {
 // kv设置，最终一致性
 func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     n.setStatusInReplication(true)
+    result := gMSG_REPL_RESPONSE
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         var items interface{}
         if gjson.DecodeTo(msg.Body, &items) == nil {
@@ -131,47 +133,69 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
             }
             n.LogList.PushFront(entry)
             n.saveLogEntry(entry)
-            // 这里不做主动通知数据同步，而是依靠心跳检测时的单线程数据同步
-            // 并且为保证客户端能够及时相应（例如在写入请求的下一次获取请求将一定能够获取到最新的数据），
-            // 因此，请求端应当在leader返回成功后，同时将该数据写入到本地
-            // n.sendLogEntryToPeers(entry)
+            if !n.sendLogEntryToPeers(entry) {
+                result = gMSG_REPL_FAILED
+            }
         }
     } else {
         var entry LogEntry
-        gjson.DecodeTo(msg.Body, &entry)
-        n.saveLogEntry(entry)
+        if gjson.DecodeTo(msg.Body, &entry) == nil {
+            n.saveLogEntry(entry)
+            n.LogList.PushFront(entry)
+        } else {
+            result = gMSG_REPL_FAILED
+        }
     }
     n.setStatusInReplication(false)
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+    n.sendMsg(conn, result, "")
 }
 
-// 发送数据操作到其他节点,为保证数据的强一致性，所有节点返回结果后，才算成功
-// 只要数据请求完整流程执行完毕，即使其中几个节点失败也不影响，因为有另外的数据同步方式进行进一步的数据一致性保证
-func (n *Node) sendLogEntryToPeers(entry LogEntry) {
-    var wg sync.WaitGroup
+// 发送数据操作到其他节点,为保证数据的一致性，只要有另外1个节点返回成功后，我们就认为该数据请求成功，
+// 即使在处理过程中leader挂掉，只要有另外一个节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个节点作为leader
+// 这里的机制类似于主从备份的原理，当然由于这里采用了异步并发请求的机制，如果集群存在多个其他节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小
+func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
+    result := false
     n.setStatusInReplication(true)
-    // 异步并发发送数据操作请求到其他节点
-    //glog.Println("sending log entry", entry)
+    defer n.setStatusInReplication(false)
+
+    var scount     int32 = 0
+    var fcount     int32 = 0
+    var aliveCount int32 = 0
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {
             continue
         }
-        wg.Add(1)
+        aliveCount++
         go func(info *NodeInfo, entry LogEntry) {
-            defer wg.Done()
             conn := n.getConn(info.Ip, gPORT_REPL)
             if conn == nil {
+                atomic.AddInt32(&fcount, 1)
                 return
             }
             defer conn.Close()
             if n.sendMsg(conn, entry.Act, gjson.Encode(entry)) == nil {
-                n.receiveMsg(conn)
+                msg := n.receiveMsg(conn)
+                if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
+                    atomic.AddInt32(&scount, 1)
+                } else {
+                    atomic.AddInt32(&fcount, 1)
+                }
             }
         }(&info, entry)
     }
-    wg.Wait()
-    n.setStatusInReplication(false)
+    for aliveCount > 0 {
+        if atomic.LoadInt32(&scount) > 0 {
+            result = true
+            break;
+        }
+        if atomic.LoadInt32(&fcount) == aliveCount {
+            break;
+        }
+        time.Sleep(time.Millisecond)
+    }
+
+    return result
 }
 
 // 心跳响应
