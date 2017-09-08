@@ -437,6 +437,19 @@ func (n *Node) getAllPeers() *[]NodeInfo{
     return &list
 }
 
+// 生成一个唯一的LogId，相对于leader节点来说，并且只有leader节点才能生成LogId
+// 由于一个集群中只会存在一个leader，因此该LogId可以看做唯一性
+func (n *Node) makeLogId() int64 {
+    n.mutex.Lock()
+    if n.LogIdIndex < n.LastLogId {
+        n.LogIdIndex = n.LastLogId
+    }
+    n.LogIdIndex++
+    r := n.LogIdIndex
+    n.mutex.Unlock()
+    return r
+}
+
 func (n *Node) getId() string {
     n.mutex.RLock()
     r := n.Id

@@ -95,7 +95,6 @@ func (n *Node) peersReplicationLoop() {
 func (n *Node) autoCleanLogList() {
     for {
         time.Sleep(gLOG_REPL_LOGCLEAN_INTERVAL * time.Millisecond)
-        match    := false
         minLogId := n.getMinLogIdFromPeers()
         if minLogId == 0 {
             continue
@@ -103,11 +102,7 @@ func (n *Node) autoCleanLogList() {
         p := n.LogList.Back()
         for p != nil {
             entry := p.Value.(LogEntry)
-            // 该minLogId必需在日志中存在完整匹配的日志
-            if !match && entry.Id == minLogId {
-                match = true
-            }
-            if match && entry.Id <= minLogId {
+            if entry.Id <= minLogId {
                 t := p.Prev()
                 n.LogList.Remove(p)
                 p  = t
@@ -121,7 +116,7 @@ func (n *Node) autoCleanLogList() {
 
 // 获取节点中已同步的最小的log id
 func (n *Node) getMinLogIdFromPeers() int64 {
-    var minLogId int64 = 0
+    var minLogId int64 = n.getLastLogId()
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {

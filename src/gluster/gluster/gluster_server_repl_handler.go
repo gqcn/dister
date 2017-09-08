@@ -122,17 +122,19 @@ func (n *Node) onMsgReplDataRemove(conn net.Conn, msg *Msg) {
 // kv设置，最终一致性
 func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     n.setStatusInReplication(true)
+    defer n.setStatusInReplication(false)
+
     result := gMSG_REPL_RESPONSE
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         var items interface{}
         if gjson.DecodeTo(msg.Body, &items) == nil {
             var entry = LogEntry {
-                Id    : gtime.Nanosecond(),
+                Id    : n.makeLogId(),
                 Act   : msg.Head,
                 Items : items,
             }
-            n.LogList.PushFront(entry)
             n.saveLogEntry(entry)
+            n.LogList.PushFront(entry)
             if !n.sendLogEntryToPeers(entry) {
                 result = gMSG_REPL_FAILED
             }
@@ -146,7 +148,6 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
             result = gMSG_REPL_FAILED
         }
     }
-    n.setStatusInReplication(false)
     n.sendMsg(conn, result, "")
 }
 
@@ -154,13 +155,17 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
 // 即使在处理过程中leader挂掉，只要有另外一个节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个节点作为leader
 // 这里的机制类似于主从备份的原理，当然由于这里采用了异步并发请求的机制，如果集群存在多个其他节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小
 func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
-    result := false
+    // 只有一个leader节点
+    if n.Peers.Size() < 1 {
+        return true
+    }
     n.setStatusInReplication(true)
     defer n.setStatusInReplication(false)
 
     var scount     int32 = 0
     var fcount     int32 = 0
     var aliveCount int32 = 0
+    result := false
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {

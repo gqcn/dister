@@ -31,7 +31,7 @@ import (
 const (
     gVERSION                        = "0.8"   // 当前版本
     gCOMPRESS_COMMUNICATION         = true    // 是否在通信时进行内容压缩
-    gCOMPRESS_SAVING                = false   // 是否在存储时压缩内容
+    gCOMPRESS_SAVING                = true    // 是否在存储时压缩内容
     // 集群端口定义
     gPORT_RAFT                      = 4166    // 集群协议通信接口
     gPORT_REPL                      = 4167    // 集群数据同步接口
@@ -61,7 +61,7 @@ const (
     gELECTION_TIMEOUT_HEARTBEAT     = 500     // (毫秒)RAFT Leader统治维持心跳间隔
     gLOG_REPL_TIMEOUT_HEARTBEAT     = 1000    // (毫秒)数据同步检测心跳间隔(数据包括kv数据及service数据)
     gLOG_REPL_AUTOSAVE_INTERVAL     = 1000    // (毫秒)数据自动物理化保存的间隔
-    gLOG_REPL_LOGCLEAN_INTERVAL     = 60000   // (毫秒)数据同步时的日志清理间隔，默认60秒清理一次
+    gLOG_REPL_LOGCLEAN_INTERVAL     = 5000    // (毫秒)数据同步时的日志清理间隔
     gLOG_REPL_PEERS_INTERVAL        = 3000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL  = 2000    // (毫秒)健康检查默认间隔
 
@@ -130,6 +130,7 @@ type Node struct {
     ElectionDeadline    int64                    // 选举超时时间点
     isInDataReplication bool                     // 是否正在数据同步过程中
 
+    LogIdIndex          int64                    // 用于生成LogId的参考字段
     LastLogId           int64                    // 最后一次保存log的id，用以数据一致性判断
     LogCount            int                      // 物理化保存的日志总数量，用于数据一致性判断
     LastSavedLogId      int64                    // 最后一次物理化log的id，用以物理化保存识别
@@ -270,6 +271,7 @@ func NewServer() *Node {
 }
 
 // 生成节点的唯一ID(md5(第一张网卡的mac地址))
+// @todo 可以考虑有无更好的方式标识一个节点的唯一性
 func nodeId() string {
     interfaces, err :=  net.Interfaces()
     if err != nil {
@@ -310,6 +312,8 @@ func Receive(conn net.Conn) []byte {
         } else {
             if length == buffersize {
                 data = gutil.MergeSlice(data, buffer)
+                // 如果读取的数据太大，需要延迟超时时间
+                conn.SetReadDeadline(time.Now().Add(gTCP_READ_TIMEOUT * time.Millisecond))
             } else {
                 data = gutil.MergeSlice(data, buffer[0:length])
                 break;
