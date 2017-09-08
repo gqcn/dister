@@ -72,17 +72,20 @@ func (n *Node) Run() {
     // 读取命令行参数
     n.initFromCommand()
 
-    // 显示当前节点信息
-    fmt.Printf( "gluster version %s, start running...\n", gVERSION)
-    fmt.Println("============================================")
-    fmt.Println("Host Id   :", n.Id)
-    fmt.Println("Host Role :", roleName(n.Role))
-    fmt.Println("Host Name :", n.Name)
-    fmt.Println("Host Group:", n.Group)
-    fmt.Println("============================================")
-
     // 初始化节点数据
     n.restoreDataFromFile()
+
+    // 显示当前节点信息
+    fmt.Printf( "gluster version %s, start running...\n", gVERSION)
+    fmt.Println("================================================")
+    fmt.Println("Host Id       :", n.Id)
+    fmt.Println("Host Role     :", roleName(n.Role))
+    fmt.Println("Host Name     :", n.Name)
+    fmt.Println("Host Group    :", n.Group)
+    fmt.Println("Host LogPath  :", glog.GetLogPath())
+    fmt.Println("Host SavePath :", n.SavePath)
+    fmt.Println("Group MinNode :", n.MinNode)
+    fmt.Println("================================================")
 
     // 创建接口监听
     go gtcp.NewServer(fmt.Sprintf(":%d", gPORT_RAFT),  n.raftTcpHandler).Run()
@@ -115,6 +118,11 @@ func (n *Node) Run() {
 
 // 从命令行读取配置文件内容
 func (n *Node) initFromCommand() {
+    // 节点名称
+    name := gconsole.Option.Get("Name")
+    if name != "" {
+        n.setName(name)
+    }
     // 集群名称
     group := gconsole.Option.Get("Group")
     if group != "" {
@@ -141,6 +149,11 @@ func (n *Node) initFromCommand() {
     ip := gconsole.Option.Get("Ip")
     if ip != "" {
         n.setIp(ip)
+    }
+    // (可选)节点地址IP或者域名
+    scan := gconsole.Option.GetBool("Scan")
+    if scan {
+        n.sayHiToLocalLan()
     }
     // (可选)节点地址IP或者域名
     minNode := gconsole.Option.GetInt("MinNode")
@@ -178,6 +191,11 @@ func (n *Node) initFromCfg() {
         glog.Fatalln("config file decoding failed(surely a json format?), exit")
     }
     glog.Println("initializing from", cfgpath)
+    // 节点名称
+    name := j.GetString("Name")
+    if name != "" {
+        n.setName(name)
+    }
     // 集群名称
     group := j.GetString("Group")
     if group != "" {
@@ -204,6 +222,11 @@ func (n *Node) initFromCfg() {
     ip := j.GetString("Ip")
     if ip != "" {
         n.setIp(ip)
+    }
+    // (可选)本地局域网搜索
+    scan := j.GetBool("Scan")
+    if scan {
+        n.sayHiToLocalLan()
     }
     // (可选)节点地址IP或者域名
     minNode := j.GetInt("MinNode")
@@ -355,13 +378,22 @@ func (n *Node) sayHi(ip string) bool {
 
 // 向局域网内其他主机通知上线
 func (n *Node) sayHiToLocalLan() {
-    segment := gip.GetSegment(n.Ip)
-    if segment == "" {
+    ip      := n.getIp()
+    segment := gip.GetSegment(ip)
+    if segment == "" || !gip.IsIntranet(ip){
         glog.Fatalln("invalid listening ip given")
         return
     }
+    if segment == "127.0.0" {
+        glog.Error("there're multiple ips in this host, bind one to make scan work, exit scanning")
+        return
+    }
     for i := 1; i < 256; i++ {
-        go n.sayHi(fmt.Sprintf("%s.%d", segment, i))
+        go func(ip string) {
+            if n.sayHi(ip) {
+                glog.Println("successfully scan and add local ip:", ip)
+            }
+        }(fmt.Sprintf("%s.%d", segment, i))
     }
 }
 
@@ -415,6 +447,13 @@ func (n *Node) getId() string {
 func (n *Node) getIp() string {
     n.mutex.RLock()
     r := n.Ip
+    n.mutex.RUnlock()
+    return r
+}
+
+func (n *Node) getName() string {
+    n.mutex.RLock()
+    r := n.Name
     n.mutex.RUnlock()
     return r
 }
@@ -526,6 +565,12 @@ func (n *Node) resetAsCandidate() {
     n.Leader     = nil
     n.Score      = 0
     n.ScoreCount = 0
+    n.mutex.Unlock()
+}
+
+func (n *Node) setName(name string) {
+    n.mutex.Lock()
+    n.Name = name
     n.mutex.Unlock()
 }
 

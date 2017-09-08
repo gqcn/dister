@@ -21,11 +21,9 @@ import (
     "time"
     "io"
     "g/util/gutil"
-    "sort"
     "g/net/gip"
     "strings"
     "g/encoding/gmd5"
-    "fmt"
     "g/encoding/gcompress"
     "g/os/gconsole"
 )
@@ -267,19 +265,24 @@ func NewServer() *Node {
     return &node
 }
 
-// 生成节点的唯一ID(hostname+ips)
+// 生成节点的唯一ID(md5(第一张网卡的mac地址))
 func nodeId() string {
-    hostname, err := os.Hostname()
+    interfaces, err :=  net.Interfaces()
     if err != nil {
-        glog.Fatalln("getting local hostname failed:", err)
+        glog.Fatalln("getting local MAC address failed:", err)
     }
-    ips, err      := gip.IntranetIP()
-    if err != nil {
-        glog.Fatalln("getting local ips:", err)
+    mac := ""
+    for _, inter := range interfaces {
+        address := inter.HardwareAddr.String()
+        if address != "" {
+            mac = address
+            break;
+        }
     }
-    // 如果有多个IP，那么将IP升序排序
-    sort.Slice(ips, func(i, j int) bool { return ips[i] < ips[j] })
-    return strings.ToUpper(gmd5.EncodeString(fmt.Sprintf("%s/%s", hostname, strings.Join(ips, ","))))
+    if mac == "" {
+        glog.Fatalln("getting local MAC address failed")
+    }
+    return strings.ToUpper(gmd5.EncodeString(mac))
 }
 
 // 获取数据
