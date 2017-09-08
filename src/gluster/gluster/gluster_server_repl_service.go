@@ -11,6 +11,7 @@ import (
     "fmt"
     "strconv"
     "g/os/gcache"
+    "os/exec"
 )
 
 // 将Service转为可json化的数据结构
@@ -85,9 +86,10 @@ func (n *Node) checkServiceHealth(service *Service) {
             //glog.Printf("start checking node: %s, name: %s, \n", name, service.Name)
             ostatus := m.Get("status")
             switch strings.ToLower(service.Type) {
-                case "mysql": fallthrough
-                case "pgsql": n.dbHealthCheck(service.Type, m)
-                case "web":   n.webHealthCheck(m)
+                case "mysql":  fallthrough
+                case "pgsql":  n.dbHealthCheck(service.Type, m)
+                case "web":    n.webHealthCheck(m)
+                case "custom": n.customHealthCheck(m)
             }
             nstatus := m.Get("status")
             if ostatus != nstatus {
@@ -99,7 +101,8 @@ func (n *Node) checkServiceHealth(service *Service) {
             if interval != nil {
                 timeout, _ = strconv.ParseInt(interval.(string), 10, 64)
             }
-            gcache.Set(cachekey, 1, timeout)
+            // 缓存时间是按照秒进行缓存，因此需要将毫秒转换为秒
+            gcache.Set(cachekey, 1, int(timeout/1000))
             wg.Done()
         }(k, v.(*gmap.StringInterfaceMap), &updated)
     }
@@ -146,28 +149,40 @@ func (n *Node) dbHealthCheck(stype string, item *gmap.StringInterfaceMap) {
 
 // WEB健康检测
 func (n *Node) webHealthCheck(item *gmap.StringInterfaceMap) {
-    url   := ""
-    check := item.Get("check")
-    if check == nil {
-        host := item.Get("host")
-        port := item.Get("port")
-        if host != nil && port != nil {
-            url = fmt.Sprintf("http://%s:%s", host, port)
-        }
-    } else {
-        url = check.(string)
-    }
-    if url == "" {
-        return
-    }
+    host := item.Get("host")
+    port := item.Get("port")
+    url  := fmt.Sprintf("http://%s:%s", host, port)
     r := ghttp.Get(url)
     if r == nil || r.StatusCode != 200 {
         item.Set("status", 0)
     } else {
         item.Set("status", 1)
     }
-
     if r != nil {
         r.Close()
     }
+}
+
+// 自定义程序健康检测
+func (n *Node) customHealthCheck(item *gmap.StringInterfaceMap) {
+    script := item.Get("script")
+    parts  := strings.Fields(script.(string))
+    result := 0
+    if len(parts) > 1 {
+        r, err := exec.Command(parts[0], parts[1:]...).Output()
+        if err != nil {
+            //glog.Error(err)
+        } else if strings.TrimSpace(string(r)) == "1" {
+            result = 1
+        }
+    } else {
+        r, err := exec.Command(parts[0]).Output()
+        if err != nil {
+            //glog.Error(err)
+        } else if strings.TrimSpace(string(r)) == "1" {
+            result = 1
+        }
+
+    }
+    item.Set("status", result)
 }

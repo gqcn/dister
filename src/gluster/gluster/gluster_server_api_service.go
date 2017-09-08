@@ -48,6 +48,7 @@ func (this *NodeApiService) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
 }
 
 // service 新增
+// @todo 完善service数据结构检查，这块会很复杂
 func (this *NodeApiService) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     this.Post(r, w)
 }

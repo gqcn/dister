@@ -1,14 +1,14 @@
 [
     {
-        "name" : "ucenter",
+        "name" : "db1",
         "type" : "mysql",
         "node" : {
             "node1": {"host":"192.168.2.15",  "port": "3306", "user":"root", "pass":"123456", "database":"test", "priority": "100", "interval" : "2000"},
-            "node2": {"host":"192.168.2.124", "port": "3306", "user":"root", "pass":"123456", "database":"hhzl_gdg", "priority": "100", "interval" : "2000"}
+            "node2": {"host":"192.168.2.124", "port": "3306", "user":"root", "pass":"123456", "database":"user", "priority": "100", "interval" : "2000"}
         }
     },
     {
-        "name" : "admindb",
+        "name" : "db2",
         "type" : "mysql",
         "node" : {
             "node1": {"host":"192.168.2.15", "port": "3306", "user":"root", "pass":"123456", "database":"test2", "priority": "100", "interval" : "2000"},
@@ -19,10 +19,19 @@
         "name" : "homesite",
         "type" : "web",
         "node" : {
-            "node1": {"host":"192.168.2.15", "port": "80",   "interval" : "5000", "priority": "100", "check":"http://163.com"},
+            "node1": {"host":"192.168.2.15", "port": "80",   "interval" : "5000", "priority": "100"},
             "node2": {"host":"192.168.2.15", "port": "8080", "interval" : "5000", "priority": "100"},
             "node3": {"host":"192.168.2.15", "port": "8088", "interval" : "5000", "priority": "100"},
             "node4": {"host":"192.168.2.15", "port": "8888", "interval" : "5000", "priority": "100"}
+        }
+    },
+    {
+        "name" : "taskmanager",
+        "type" : "custom",
+        "node" : {
+            "node1": {"host":"192.168.2.100", "script": "/var/www/check.sh --host=192.168.2.101", "interval" : "5000", "priority": "100"},
+            "node2": {"host":"192.168.2.101", "script": "/var/www/check.sh --host=192.168.2.101", "interval" : "5000", "priority": "100"},
+            "node3": {"host":"192.168.2.102", "script": "echo 1",                                 "interval" : "5000", "priority": "100"}
         }
     }
 ]

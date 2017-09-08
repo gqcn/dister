@@ -256,9 +256,11 @@ func NewServer() *Node {
     gconsole.BindHandle("addnode",    cmd_addnode)
     gconsole.BindHandle("delnode",    cmd_delnode)
     gconsole.BindHandle("kvs",        cmd_kvs)
+    gconsole.BindHandle("getkv",      cmd_getkv)
     gconsole.BindHandle("addkv",      cmd_addkv)
     gconsole.BindHandle("delkv",      cmd_delkv)
     gconsole.BindHandle("services",   cmd_services)
+    gconsole.BindHandle("getservice", cmd_getservice)
     gconsole.BindHandle("addservice", cmd_addservice)
     gconsole.BindHandle("delservice", cmd_delservice)
 

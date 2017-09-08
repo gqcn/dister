@@ -10,6 +10,7 @@ import (
 )
 
 // 查看集群节点
+// 使用方式：gluster nodes
 func cmd_nodes () {
     r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API))
     if r == nil {
@@ -95,10 +96,22 @@ func cmd_delnode () {
     fmt.Println("ok")
 }
 
-// 查询kv
-// 查看所有键值数据：gluster
-// 查看指定键名数据：gluster 键名
+// 查看所有kv
+// 使用方式：gluster kvs
 func cmd_kvs () {
+    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API))
+    if r == nil {
+        fmt.Println("ERROR: connect to local gluster api failed")
+        return
+    }
+    defer r.Close()
+    fmt.Println(r.ReadAll())
+}
+
+
+// 查询kv
+// 使用方式：gluster getkv 键名
+func cmd_getkv () {
     k := gconsole.Value.Get(2)
     r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/kv?k=%s", gPORT_API, k))
     if r == nil {
@@ -110,7 +123,7 @@ func cmd_kvs () {
 }
 
 // 设置kv
-// 使用方式：gluster 键名 键值
+// 使用方式：gluster addkv 键名 键值
 func cmd_addkv () {
     k := gconsole.Value.Get(2)
     v := gconsole.Value.Get(3)
@@ -162,9 +175,21 @@ func cmd_delkv () {
     fmt.Println("ok")
 }
 
-// 查看Service
-// 使用方式：gluster getservice [Service名称]
+// 查看所有Service
+// 使用方式：gluster services
 func cmd_services () {
+    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API))
+    if r == nil {
+        fmt.Println("ERROR: connect to local gluster api failed")
+        return
+    }
+    defer r.Close()
+    fmt.Println(r.ReadAll())
+}
+
+// 查看Service
+// 使用方式：gluster getservice Service名称
+func cmd_getservice () {
     name := gconsole.Value.Get(2)
     r    := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/service?name=%s", gPORT_API, name))
     if r == nil {
