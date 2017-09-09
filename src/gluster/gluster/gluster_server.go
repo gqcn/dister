@@ -73,7 +73,7 @@ func (n *Node) Run() {
     n.initFromCommand()
 
     // 初始化节点数据
-    n.restoreDataFromFile()
+    n.restoreFromFile()
 
     // 显示当前节点信息
     fmt.Printf( "gluster version %s, start running...\n", gVERSION)
