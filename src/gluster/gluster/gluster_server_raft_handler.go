@@ -29,8 +29,6 @@ func (n *Node) raftTcpHandler(conn net.Conn) {
         case gMSG_RAFT_SCORE_COMPARE_REQUEST:   n.onMsgRaftScoreCompareRequest(conn, msg)
         case gMSG_RAFT_SPLIT_BRAINS_CHECK:      n.onMsgRaftSplitBrainsCheck(conn, msg)
         case gMSG_RAFT_SPLIT_BRAINS_UNSET:      n.onMsgRaftSplitBrainsUnset(conn, msg)
-        case gMSG_API_PEERS_ADD:                n.onMsgApiPeersAdd(conn, msg)
-        case gMSG_API_PEERS_REMOVE:             n.onMsgApiPeersRemove(conn, msg)
     }
     //这里不用自动关闭链接，由于链接有读取超时，当一段时间没有数据时会自动关闭
     n.raftTcpHandler(conn)

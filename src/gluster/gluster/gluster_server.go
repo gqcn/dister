@@ -441,11 +441,13 @@ func (n *Node) getAllPeers() *[]NodeInfo{
 // 由于一个集群中只会存在一个leader，因此该LogId可以看做唯一性
 func (n *Node) makeLogId() int64 {
     n.mutex.Lock()
-    if n.LogIdIndex < n.LastLogId {
-        n.LogIdIndex = n.LastLogId
+    index := int64(n.LastLogId/10000)
+    if n.LogIdIndex < index {
+        n.LogIdIndex = index
     }
     n.LogIdIndex++
-    r := n.LogIdIndex
+    // 后四位是随机数，保证出现冲突的概率很小
+    r := n.LogIdIndex*10000 + int64(grand.Rand(0, 9999))
     n.mutex.Unlock()
     return r
 }
@@ -506,17 +508,17 @@ func (n *Node) getLastLogId() int64 {
     return r
 }
 
-func (n *Node) getLogCount() int {
+func (n *Node) getMinNode() int {
     n.mutex.RLock()
-    r := n.LogCount
+    r := n.MinNode
     n.mutex.RUnlock()
     return r
 }
 
-func (n *Node) getLastSavedLogId() int64 {
-    n.mutex.Lock()
-    r := n.LastSavedLogId
-    n.mutex.Unlock()
+func (n *Node) getLogCount() int {
+    n.mutex.RLock()
+    r := n.LogCount
+    n.mutex.RUnlock()
     return r
 }
 
@@ -541,13 +543,39 @@ func (n *Node) getElectionDeadline() int64 {
     return r
 }
 
-// 获取数据文件的绝对路径
-func (n *Node) getDataFilePath() string {
+func (n *Node) getPeersFilePath() string {
     n.mutex.RLock()
-    //path := n.SavePath + gfile.Separator + n.Id + "." + n.FileName
-    path := n.SavePath + gfile.Separator + n.FileName
+    path := n.SavePath + gfile.Separator + "gluster.peers.db"
     n.mutex.RUnlock()
     return path
+}
+
+func (n *Node) getDataFilePath() string {
+    n.mutex.RLock()
+    path := n.SavePath + gfile.Separator + "gluster.data.db"
+    n.mutex.RUnlock()
+    return path
+}
+
+func (n *Node) getServiceFilePath() string {
+    n.mutex.RLock()
+    path := n.SavePath + gfile.Separator + "gluster.service.db"
+    n.mutex.RUnlock()
+    return path
+}
+
+func (n *Node) getDataDirty() bool {
+    n.mutex.RLock()
+    r := n.IsDataDirty
+    n.mutex.RUnlock()
+    return r
+}
+
+func (n *Node) getServiceDirty() bool {
+    n.mutex.RLock()
+    r := n.IsServiceDirty
+    n.mutex.RUnlock()
+    return r
 }
 
 // 添加比分节
@@ -612,6 +640,18 @@ func (n *Node) setRole(role int) {
 
 }
 
+func (n *Node) setDataDirty(b bool) {
+    n.mutex.Lock()
+    n.IsDataDirty = b
+    n.mutex.Unlock()
+}
+
+func (n *Node) setServiceDirty(b bool) {
+    n.mutex.Lock()
+    n.IsServiceDirty = b
+    n.mutex.Unlock()
+}
+
 func (n *Node) setRaftRole(role int) {
     n.mutex.Lock()
     if n.RaftRole != role {
@@ -650,12 +690,6 @@ func (n *Node) setLastLogId(id int64) {
 func (n *Node) setLogCount(count int) {
     n.mutex.Lock()
     n.LogCount = count
-    n.mutex.Unlock()
-}
-
-func (n *Node) setLastSavedLogId(id int64) {
-    n.mutex.Lock()
-    n.LastSavedLogId = id
     n.mutex.Unlock()
 }
 

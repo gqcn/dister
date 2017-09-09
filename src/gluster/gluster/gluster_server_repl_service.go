@@ -112,6 +112,7 @@ func (n *Node) checkServiceHealth(service *Service) {
     if updated {
         n.ServiceForApi.Set(service.Name, *n.serviceToServiceStruct(service))
         n.setLastServiceLogId(gtime.Microsecond())
+        n.setServiceDirty(true)
     }
 }
 

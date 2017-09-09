@@ -7,39 +7,51 @@ import (
     "g/encoding/gjson"
     "time"
     "g/os/gfile"
-    "g/util/gtime"
     "g/os/glog"
     "g/encoding/gcompress"
+    "sync"
 )
 
 // 日志自动保存处理
 func (n *Node) autoSavingHandler() {
-    t := gtime.Millisecond()
     for {
-        // 当日志列表的最新ID与保存的ID不相等，或者超过超时时间
-        if n.getLastLogId() != n.getLastSavedLogId() || gtime.Millisecond() - t > gLOG_REPL_AUTOSAVE_INTERVAL {
-            //glog.Println("saving data to file")
-            n.saveDataToFile()
-            t = gtime.Millisecond()
-        } else {
-            time.Sleep(100 * time.Millisecond)
+        go n.savePeersToFile()
+        if n.getDataDirty() {
+            go func() {
+                n.saveDataToFile()
+                n.setDataDirty(false)
+            }()
         }
+        if n.getServiceDirty() {
+            go func() {
+                n.saveServiceToFile()
+                n.setServiceDirty(false)
+            }()
+        }
+        time.Sleep(gLOG_REPL_AUTOSAVE_INTERVAL * time.Millisecond)
+    }
+}
+
+// 保存Peers到磁盘
+func (n *Node) savePeersToFile() {
+    data    := *n.Peers.Clone()
+    content := []byte(gjson.Encode(&data))
+    if gCOMPRESS_SAVING {
+        content = gcompress.Zlib(content)
+    }
+    err := gfile.PutBinContents(n.getPeersFilePath(), content)
+    if err != nil {
+        glog.Error("saving peers error:", err)
     }
 }
 
 // 保存数据到磁盘
 func (n *Node) saveDataToFile() {
-    data := SaveInfo {
-        LastLogId           : n.getLastLogId(),
-        LogCount            : n.getLogCount(),
-        LogList             : make([]LogEntry, 0),
-        LastServiceLogId    : n.getLastServiceLogId(),
-        Service             : *n.serviceMapToServiceStructMap(),
-        Peers               : *n.Peers.Clone(),
-        DataMap             : *n.DataMap.Clone(),
-    }
-    for _, v := range n.LogList.BackAll() {
-        data.LogList = append(data.LogList, v.(LogEntry))
+    data := make(map[string]interface{})
+    data  = map[string]interface{} {
+        "LastLogId" : n.getLastLogId(),
+        "LogCount"  : n.getLogCount(),
+        "DataMap"   : *n.DataMap.Clone(),
     }
     content := []byte(gjson.Encode(&data))
     if gCOMPRESS_SAVING {
@@ -48,13 +60,75 @@ func (n *Node) saveDataToFile() {
     err := gfile.PutBinContents(n.getDataFilePath(), content)
     if err != nil {
         glog.Error("saving data error:", err)
-    } else {
-        n.setLastSavedLogId(n.getLastLogId())
+    }
+}
+
+// 保存Service到磁盘
+func (n *Node) saveServiceToFile() {
+    data := make(map[string]interface{})
+    data  = map[string]interface{} {
+        "LastServiceLogId"  : n.getLastServiceLogId(),
+        "Service"           : *n.serviceMapToServiceStructMap(),
+    }
+    content := []byte(gjson.Encode(&data))
+    if gCOMPRESS_SAVING {
+        content = gcompress.Zlib(content)
+    }
+    err := gfile.PutBinContents(n.getServiceFilePath(), content)
+    if err != nil {
+        glog.Error("saving service error:", err)
     }
 }
 
 // 从物理化文件中恢复变量
-func (n *Node) restoreDataFromFile() {
+func (n *Node) restoreFromFile() {
+    var wg sync.WaitGroup
+    wg.Add(1)
+    go func() {
+        n.restorePeers()
+        wg.Done()
+    }()
+
+    wg.Add(1)
+    go func() {
+        n.restoreDataMap()
+        wg.Done()
+    }()
+
+    wg.Add(1)
+    go func() {
+        n.restoreService()
+        wg.Done()
+    }()
+    wg.Wait()
+}
+
+// 恢复Peers
+func (n *Node) restorePeers() {
+    path := n.getPeersFilePath()
+    if gfile.Exists(path) {
+        bin := gfile.GetBinContents(path)
+        if gCOMPRESS_SAVING {
+            bin = gcompress.UnZlib(bin)
+        }
+        if bin != nil && len(bin) > 0 {
+            glog.Println("restore peers from", path)
+            m := make(map[string]NodeInfo)
+            if err := gjson.DecodeTo(string(bin), &m); err == nil {
+                for k, v := range m {
+                    if !n.Peers.Contains(k) {
+                        n.Peers.Set(k, v)
+                    }
+                }
+            } else {
+                glog.Error(err)
+            }
+        }
+    }
+}
+
+// 恢复DataMap
+func (n *Node) restoreDataMap() {
     path := n.getDataFilePath()
     if gfile.Exists(path) {
         bin := gfile.GetBinContents(path)
@@ -63,54 +137,41 @@ func (n *Node) restoreDataFromFile() {
         }
         if bin != nil && len(bin) > 0 {
             glog.Println("restore data from", path)
-            content := string(bin)
-            var data = SaveInfo {
-                LogList : make([]LogEntry, 0),
-                Service : make(map[string]ServiceStruct),
-                Peers   : make(map[string]interface{}),
-                DataMap : make(map[string]string),
-            }
-            if gjson.DecodeTo(content, &data) == nil {
-                n.setLastLogId(data.LastLogId)
-                n.setLogCount(data.LogCount)
-                n.setLastSavedLogId(data.LastLogId)
-                n.setLastServiceLogId(data.LastServiceLogId)
-                n.restoreLogList(&data)
-                n.restoreService(&data)
-                n.restoreDataMap(&data)
-                n.restorePeer(&data)
+            m := make(map[string]string)
+            j := gjson.DecodeToJson(string(bin))
+            n.setLastLogId(j.GetInt64("LastLogId"))
+            n.setLogCount(j.GetInt("LogCount"))
+            if err := j.GetToVar("DataMap", &m); err == nil {
+                n.DataMap.BatchSet(m)
+            } else {
+                glog.Error(err)
             }
         }
     }
 }
 
-func (n *Node) restoreLogList(data *SaveInfo) {
-    for _, v := range data.LogList {
-        n.LogList.PushFront(v)
-    }
-}
-
-func (n *Node) restoreService(data *SaveInfo) {
-    for k, v := range data.Service {
-        // 如果配置文件与数据文件有同一键名的配置，那么使用配置文件的Service配置
-        if n.Service.Get(k) == nil {
-            n.Service.Set(k, *n.serviceSructToService(&v))
+// 恢复Service
+func (n *Node) restoreService() {
+    path := n.getServiceFilePath()
+    if gfile.Exists(path) {
+        bin := gfile.GetBinContents(path)
+        if gCOMPRESS_SAVING {
+            bin = gcompress.UnZlib(bin)
+        }
+        if bin != nil && len(bin) > 0 {
+            glog.Println("restore service from", path)
+            m := make(map[string]ServiceStruct)
+            j := gjson.DecodeToJson(string(bin))
+            n.setLastServiceLogId(j.GetInt64("LastServiceLogId"))
+            if err := j.GetToVar("Service", &m); err == nil {
+                for k, v := range m {
+                    n.Service.Set(k, *n.serviceSructToService(&v))
+                }
+            } else {
+                glog.Error(err)
+            }
         }
     }
-}
-
-func (n *Node) restorePeer(data *SaveInfo) {
-    infoMap := make(map[string]NodeInfo)
-    gjson.DecodeTo(gjson.Encode(data.Peers), &infoMap)
-    for k, v := range infoMap {
-        if !n.Peers.Contains(k) {
-            n.Peers.Set(k, v)
-        }
-    }
-}
-
-func (n *Node) restoreDataMap(data *SaveInfo) {
-    n.DataMap.BatchSet(data.DataMap)
 }
 
 // 使用logentry数组更新本地的日志列表

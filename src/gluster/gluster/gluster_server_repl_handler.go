@@ -25,6 +25,8 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_REPL_DATA_SET:                    n.onMsgReplDataSet(conn, msg)
         case gMSG_REPL_DATA_REMOVE:                 n.onMsgReplDataRemove(conn, msg)
         case gMSG_REPL_HEARTBEAT:                   n.onMsgReplHeartbeat(conn, msg)
+        case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
+        case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
         case gMSG_REPL_INCREMENTAL_UPDATE:          n.onMsgReplUpdate(conn, msg)
         case gMSG_REPL_COMPLETELY_UPDATE:           n.onMsgReplUpdate(conn, msg)
@@ -98,6 +100,7 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
         }
         if updated {
             n.setLastServiceLogId(gtime.Microsecond())
+            n.setServiceDirty(true)
         }
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
@@ -110,6 +113,7 @@ func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
         n.Service.Set(st.Name, *n.serviceSructToService(&st))
         n.ServiceForApi.Set(st.Name, st)
         n.setLastServiceLogId(gtime.Microsecond())
+        n.setServiceDirty(true)
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
@@ -155,9 +159,13 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
 // 即使在处理过程中leader挂掉，只要有另外一个节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个节点作为leader
 // 这里的机制类似于主从备份的原理，当然由于这里采用了异步并发请求的机制，如果集群存在多个其他节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小
 func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
-    // 只有一个leader节点
+    // 只有一个leader节点，并且配置是允许单节点运行
     if n.Peers.Size() < 1 {
-        return true
+        if n.getRaftRole() == gROLE_RAFT_LEADER && n.getMinNode() == 1 {
+            return true
+        } else {
+            return false
+        }
     }
     n.setStatusInReplication(true)
     defer n.setStatusInReplication(false)
@@ -203,29 +211,31 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
     return result
 }
 
-// 心跳响应
+// 心跳响应，用于数据的同步，包括：Peers、DataMap、Service
 func (n *Node) onMsgReplHeartbeat(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_HEARTBEAT
-    //glog.Println("heartbeat:", n.getLastLogId(), msg.Info.LastLogId, n.getStatusInReplication())
-    // 日志检测同步
-    lastLogId := n.getLastLogId()
-    if lastLogId < msg.Info.LastLogId {
-        if !n.getStatusInReplication() {
-            result = gMSG_REPL_NEED_UPDATE_FOLLOWER
-        }
-    } else if lastLogId > msg.Info.LastLogId {
-        if !n.getStatusInReplication() {
-            result = gMSG_REPL_NEED_UPDATE_LEADER
-        }
-    } else {
-        // service同步检测
-        lastServiceLogId := n.getLastServiceLogId()
-        if lastServiceLogId < msg.Info.LastServiceLogId {
-            result = gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER
-        } else if lastServiceLogId > msg.Info.LastServiceLogId {
-            result = gMSG_REPL_SERVICE_NEED_UPDATE_LEADER
+    // 如果当前节点正处于数据同步中，那么本次心跳不再执行同步判断
+    if !n.getStatusInReplication() {
+        lastLogId := n.getLastLogId()
+        if lastLogId < msg.Info.LastLogId {
+            if !n.getStatusInReplication() {
+                result = gMSG_REPL_NEED_UPDATE_FOLLOWER
+            }
+        } else if lastLogId > msg.Info.LastLogId {
+            if !n.getStatusInReplication() {
+                result = gMSG_REPL_NEED_UPDATE_LEADER
+            }
+        } else {
+            // service同步检测
+            lastServiceLogId := n.getLastServiceLogId()
+            if lastServiceLogId < msg.Info.LastServiceLogId {
+                result = gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER
+            } else if lastServiceLogId > msg.Info.LastServiceLogId {
+                result = gMSG_REPL_SERVICE_NEED_UPDATE_LEADER
+            }
         }
     }
+
     switch result {
         case gMSG_REPL_NEED_UPDATE_LEADER:          n.updateDataToRemoteNode(conn, msg)
         case gMSG_REPL_SERVICE_NEED_UPDATE_LEADER:  n.updateServiceToRemoteNode(conn, msg)
@@ -264,6 +274,7 @@ func (n *Node) saveLogEntry(entry LogEntry) {
     }
     n.addLogCount()
     n.setLastLogId(entry.Id)
+    n.setDataDirty(true)
 }
 
 // 从目标节点同步数据，采用增量+全量模式
@@ -285,6 +296,7 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
             n.setDataMap(newm)
             n.setLogCount(msg.Info.LogCount)
             n.setLastLogId(msg.Info.LastLogId)
+            n.setDataDirty(true)
         } else {
             glog.Error(err)
         }
@@ -299,23 +311,30 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
     //glog.Println("send data replication update to", msg.Info.Name)
     // 首先进行增量同步
     updated := true
-    list    := n.getLogEntriesByLastLogId(msg.Info.LastLogId)
-    length  := len(list)
-    if length > 0 && list[length - 1].Id == n.getLastLogId() && (msg.Info.LogCount + length) == n.getLogCount() {
-        if err := n.sendMsg(conn, gMSG_REPL_INCREMENTAL_UPDATE, gjson.Encode(list)); err != nil {
-            glog.Error(err)
-            return
-        }
-        rmsg := n.receiveMsg(conn)
-        if rmsg != nil {
-            if n.getLastLogId() > rmsg.Info.LastLogId {
-                //glog.Error(rmsg.Info.Name + ":", "incremental update failed, now try completely update")
-                updated = false
+    // 如果增量同步的数据量大小超过DataMap的大小，那么直接采用全量模式，否则采用增量模式
+    // 注意这里的logid都除以10000是因为logid的后四位是随机数，用以降低冲突的可能性，不是真实的id
+    if n.getLastLogId()/10000 - msg.Info.LastLogId/10000 < int64(n.DataMap.Size()) {
+        list    := n.getLogEntriesByLastLogId(msg.Info.LastLogId)
+        length  := len(list)
+        if length > 0 && list[length - 1].Id == n.getLastLogId() && (msg.Info.LogCount + length) == n.getLogCount() {
+            if err := n.sendMsg(conn, gMSG_REPL_INCREMENTAL_UPDATE, gjson.Encode(list)); err != nil {
+                glog.Error(err)
+                return
             }
+            rmsg := n.receiveMsg(conn)
+            if rmsg != nil {
+                if n.getLastLogId() > rmsg.Info.LastLogId {
+                    //glog.Error(rmsg.Info.Name + ":", "incremental update failed, now try completely update")
+                    updated = false
+                }
+            }
+        } else {
+            updated = false
         }
     } else {
         updated = false
     }
+
     if !updated {
         // 如果增量同步失败，或者判断需要完整同步，则采用全量同步
         if err := n.sendMsg(conn, gMSG_REPL_COMPLETELY_UPDATE, gjson.Encode(*n.DataMap.Clone())); err != nil {
@@ -341,6 +360,7 @@ func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
         n.setService(newmForService)
         n.setServiceForApi(newmForServiceApi)
         n.setLastServiceLogId(msg.Info.LastServiceLogId)
+        n.setServiceDirty(true)
     } else {
         glog.Error(err)
     }

@@ -40,10 +40,6 @@ func (n *Node) dataReplicationLoop() {
                     }
                     defer conn.Close()
                     for {
-                        // 如果当前正在数据同步操作中，那么等待
-                        for n.getStatusInReplication() {
-                            time.Sleep(100 * time.Millisecond)
-                        }
                         if n.getRaftRole() != gROLE_RAFT_LEADER || !n.Peers.Contains(info.Id){
                             return
                         }
@@ -53,15 +49,17 @@ func (n *Node) dataReplicationLoop() {
                         }
                         msg := n.receiveMsg(conn)
                         if msg != nil {
-                            switch msg.Head {
-                                case gMSG_REPL_INCREMENTAL_UPDATE:              n.updateDataFromRemoteNode(conn, msg)
-                                case gMSG_REPL_COMPLETELY_UPDATE:               n.updateDataFromRemoteNode(conn, msg)
-                                case gMSG_REPL_NEED_UPDATE_FOLLOWER:            n.updateDataToRemoteNode(conn, msg)
-                                case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:       n.updateServiceFromRemoteNode(conn, msg)
-                                case gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER:    n.updateServiceToRemoteNode(conn, msg)
-                                default:
-                                    time.Sleep(gLOG_REPL_TIMEOUT_HEARTBEAT * time.Millisecond)
+                            // 如果当前节点正处于数据同步中，那么本次心跳不再执行任何的数据同步判断
+                            if !n.getStatusInReplication() {
+                                switch msg.Head {
+                                    case gMSG_REPL_INCREMENTAL_UPDATE:              n.updateDataFromRemoteNode(conn, msg)
+                                    case gMSG_REPL_COMPLETELY_UPDATE:               n.updateDataFromRemoteNode(conn, msg)
+                                    case gMSG_REPL_NEED_UPDATE_FOLLOWER:            n.updateDataToRemoteNode(conn, msg)
+                                    case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:       n.updateServiceFromRemoteNode(conn, msg)
+                                    case gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER:    n.updateServiceToRemoteNode(conn, msg)
+                                }
                             }
+                            time.Sleep(gLOG_REPL_TIMEOUT_HEARTBEAT * time.Millisecond)
                         }
                     }
                 }(&info)
