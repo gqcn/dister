@@ -130,24 +130,52 @@ func (n *Node) getMinLogIdFromPeers() int64 {
 // 根据logid获取还未更新的日志列表
 // 注意：为保证日志一致性，在进行日志更新时，需要查找到目标节点logid在本地日志中存在有**完整匹配**的logid日志，并将其后的日志列表返回
 // 如果出现leader的logid比follower大，并且获取不到更新的日志列表时，表示两者数据已经不一致，需要做完整的同步复制处理
-func (n *Node) getLogEntriesByLastLogId(id int64) []LogEntry {
+// 降序查找
+func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
     if n.getLastLogId() > id {
-        match := (id == 0)
         array := make([]LogEntry, 0)
         n.LogList.RLock()
-        l := n.LogList.L.Back()
+        l := n.LogList.Front()
         for l != nil {
+            // 最大获取条数控制
+            if len(array) == max {
+                break;
+            }
             r := l.Value.(LogEntry)
-            if !match && r.Id == id {
-                match = true
-            }
-            if match && r.Id > id {
+            if r.Id > id {
                 array = append(array, r)
+                l = l.Next()
+            } else if r.Id <= id {
+                break;
             }
-            l = l.Prev()
         }
         n.LogList.RUnlock()
         return array
     }
     return nil
+}
+
+// 判断给定的logid是否是一个合法的logid
+// 降序查找
+func (n *Node) isValidLogId(id int64) bool {
+    lastLogId := n.getLastLogId()
+    if lastLogId >= id {
+        if lastLogId == id {
+            return true
+        }
+        n.LogList.RLock()
+        l := n.LogList.Front()
+        for l != nil {
+            r := l.Value.(LogEntry)
+            if r.Id == id {
+                return true
+            } else if r.Id > id {
+                l = l.Next()
+            } else {
+                break;
+            }
+        }
+        n.LogList.RUnlock()
+    }
+    return false
 }

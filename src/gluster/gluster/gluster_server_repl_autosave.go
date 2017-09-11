@@ -34,7 +34,9 @@ func (n *Node) autoSavingHandler() {
 
 // 保存Peers到磁盘
 func (n *Node) savePeersToFile() {
-    data    := *n.Peers.Clone()
+    info         := n.getNodeInfo()
+    data         := *n.Peers.Clone()
+    data[info.Id] = info
     content := []byte(gjson.Encode(&data))
     if gCOMPRESS_SAVING {
         content = gcompress.Zlib(content)
@@ -115,8 +117,9 @@ func (n *Node) restorePeers() {
             glog.Println("restore peers from", path)
             m := make(map[string]NodeInfo)
             if err := gjson.DecodeTo(string(bin), &m); err == nil {
+                myid := n.getId()
                 for k, v := range m {
-                    if !n.Peers.Contains(k) {
+                    if k != myid && !n.Peers.Contains(k) {
                         n.Peers.Set(k, v)
                     }
                 }

@@ -595,7 +595,7 @@ func (n *Node) addScoreCount() {
 // 添加日志总数
 func (n *Node) addLogCount() {
     n.mutex.Lock()
-    n.ScoreCount++
+    n.LogCount++
     n.mutex.Unlock()
 }
 

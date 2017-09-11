@@ -4,4 +4,4 @@
 ######################################
 
 #./bin/cbuild.linux_amd64src/gapp/gluster/gluster.go --name=gluster --version=lastest
-./bin/cbuild.linux_amd64 src/gluster/gluster.go --name=gluster --version=0.6_beta --arch=amd64 --os=linux
+./bin/cbuild.linux_amd64 src/gluster/gluster.go --name=gluster --version=0.8 --arch=amd64 --os=linux

@@ -218,13 +218,9 @@ func (n *Node) onMsgReplHeartbeat(conn net.Conn, msg *Msg) {
     if !n.getStatusInReplication() {
         lastLogId := n.getLastLogId()
         if lastLogId < msg.Info.LastLogId {
-            if !n.getStatusInReplication() {
-                result = gMSG_REPL_NEED_UPDATE_FOLLOWER
-            }
+            result = gMSG_REPL_NEED_UPDATE_FOLLOWER
         } else if lastLogId > msg.Info.LastLogId {
-            if !n.getStatusInReplication() {
-                result = gMSG_REPL_NEED_UPDATE_LEADER
-            }
+            result = gMSG_REPL_NEED_UPDATE_LEADER
         } else {
             // service同步检测
             lastServiceLogId := n.getLastServiceLogId()
@@ -279,12 +275,14 @@ func (n *Node) saveLogEntry(entry LogEntry) {
 
 // 从目标节点同步数据，采用增量+全量模式
 func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
+    // 如果有goroutine正在同步，那么放弃本次同步
+    if n.getStatusInReplication() {
+        return
+    }
     if msg.Head == gMSG_REPL_INCREMENTAL_UPDATE {
         // 增量同步，LogCount和LastLogId会根据保存的LogEntry自动更新
         if n.getLastLogId() < msg.Info.LastLogId {
-            if !n.getStatusInReplication() {
-                n.updateFromLogEntriesJson(msg.Body)
-            }
+            n.updateFromLogEntriesJson(msg.Body)
         }
     } else {
         // 全量同步，完整的kv数据覆盖
@@ -310,32 +308,38 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
 
     //glog.Println("send data replication update to", msg.Info.Name)
     // 首先进行增量同步
-    updated := true
+    increUpdated := true
     // 如果增量同步的数据量大小超过DataMap的大小，那么直接采用全量模式，否则采用增量模式
     // 注意这里的logid都除以10000是因为logid的后四位是随机数，用以降低冲突的可能性，不是真实的id
+    // 如果数据量大支持分批同步，每一次增量同步大小不超过10万条
     if n.getLastLogId()/10000 - msg.Info.LastLogId/10000 < int64(n.DataMap.Size()) {
-        list    := n.getLogEntriesByLastLogId(msg.Info.LastLogId)
-        length  := len(list)
-        if length > 0 && list[length - 1].Id == n.getLastLogId() && (msg.Info.LogCount + length) == n.getLogCount() {
-            if err := n.sendMsg(conn, gMSG_REPL_INCREMENTAL_UPDATE, gjson.Encode(list)); err != nil {
-                glog.Error(err)
-                return
-            }
-            rmsg := n.receiveMsg(conn)
-            if rmsg != nil {
-                if n.getLastLogId() > rmsg.Info.LastLogId {
-                    //glog.Error(rmsg.Info.Name + ":", "incremental update failed, now try completely update")
-                    updated = false
+        for {
+            list    := n.getLogEntriesByLastLogId(msg.Info.LastLogId, 100000)
+            length  := len(list)
+            if length > 0 {
+                if err := n.sendMsg(conn, gMSG_REPL_INCREMENTAL_UPDATE, gjson.Encode(list)); err != nil {
+                    glog.Error(err)
+                    return
                 }
+                if rmsg := n.receiveMsg(conn); rmsg != nil {
+                    if n.getLastLogId() == rmsg.Info.LastLogId {
+                        break;
+                    }
+                } else {
+                    increUpdated = false
+                }
+            } else {
+                increUpdated = false
             }
-        } else {
-            updated = false
+            if !increUpdated {
+                break
+            }
         }
     } else {
-        updated = false
+        increUpdated = false
     }
 
-    if !updated {
+    if !increUpdated {
         // 如果增量同步失败，或者判断需要完整同步，则采用全量同步
         if err := n.sendMsg(conn, gMSG_REPL_COMPLETELY_UPDATE, gjson.Encode(*n.DataMap.Clone())); err != nil {
             glog.Error(err)

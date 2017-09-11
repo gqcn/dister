@@ -75,6 +75,17 @@ func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse
     w.ResponseJson(1, "ok", nil)
 }
 
+//func validateNodeItemByType(nodeItem interface{}, itemType string) error {
+//    switch itemType {
+//        case "mysql": fallthrough
+//        case "pgsql":
+//
+//        case "web":
+//        case "custom":
+//
+//    }
+//}
+
 // service 删除
 func (this *NodeApiService) Delete(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)

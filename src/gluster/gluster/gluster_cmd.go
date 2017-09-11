@@ -112,9 +112,14 @@ func cmd_kvs () {
         fmt.Println("ERROR: " + data.GetString("message"))
         return
     }
-    fmt.Printf("%32s : %s\n", "K", "V")
-    for k, v := range data.GetMap("data") {
-        fmt.Printf("%32.32s : %.100s\n", k, v)
+    m := data.GetMap("data")
+    if len(m) > 0 {
+        fmt.Printf("%32s : %s\n", "K", "V")
+        for k, v := range m {
+            fmt.Printf("%32.32s : %.100s\n", k, v)
+        }
+    } else {
+        fmt.Println("it's empty")
     }
 }
 

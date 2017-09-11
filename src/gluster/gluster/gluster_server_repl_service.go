@@ -8,7 +8,6 @@ import (
     "g/database/gdb"
     "g/net/ghttp"
     "g/core/types/gmap"
-    "fmt"
     "strconv"
     "g/os/gcache"
     "os/exec"
@@ -150,17 +149,17 @@ func (n *Node) dbHealthCheck(stype string, item *gmap.StringInterfaceMap) {
 
 // WEB健康检测
 func (n *Node) webHealthCheck(item *gmap.StringInterfaceMap) {
-    host := item.Get("host")
-    port := item.Get("port")
-    url  := fmt.Sprintf("http://%s:%s", host, port)
-    r := ghttp.Get(url)
-    if r == nil || r.StatusCode != 200 {
-        item.Set("status", 0)
-    } else {
-        item.Set("status", 1)
-    }
-    if r != nil {
-        r.Close()
+    url := item.Get("url")
+    if url != nil {
+        r := ghttp.Get(url.(string))
+        if r == nil || r.StatusCode != 200 {
+            item.Set("status", 0)
+        } else {
+            item.Set("status", 1)
+        }
+        if r != nil {
+            r.Close()
+        }
     }
 }
 
