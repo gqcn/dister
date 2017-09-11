@@ -288,12 +288,9 @@ func Receive(conn net.Conn) []byte {
     for {
         buffer      := make([]byte, buffersize)
         length, err := conn.Read(buffer)
-        if err != nil {
-            if retry > gTCP_RETRY_COUNT - 1 {
+        if length < 1 && err != nil {
+            if err == io.EOF || retry > gTCP_RETRY_COUNT - 1 {
                 break;
-            }
-            if err != io.EOF {
-                //glog.Println("receive err:", err, "retry:", retry)
             }
             retry ++
             time.Sleep(100 * time.Millisecond)
@@ -304,6 +301,9 @@ func Receive(conn net.Conn) []byte {
                 conn.SetReadDeadline(time.Now().Add(gTCP_READ_TIMEOUT * time.Millisecond))
             } else {
                 data = gutil.MergeSlice(data, buffer[0:length])
+                break;
+            }
+            if err == io.EOF {
                 break;
             }
         }
