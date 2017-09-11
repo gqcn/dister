@@ -31,7 +31,7 @@ import (
 const (
     gVERSION                        = "0.8"   // 当前版本
     gCOMPRESS_COMMUNICATION         = true    // 是否在通信时进行内容压缩
-    gCOMPRESS_SAVING                = false   // 是否在存储时压缩内容
+    gCOMPRESS_SAVING                = false   // 是否在存储时压缩内容(由于LogEntry文件检索的需要，暂时都不做压缩处理)
     // 集群端口定义
     gPORT_RAFT                      = 4166    // 集群协议通信接口
     gPORT_REPL                      = 4167    // 集群数据同步接口
@@ -61,7 +61,6 @@ const (
     gELECTION_TIMEOUT_HEARTBEAT     = 500     // (毫秒)RAFT Leader统治维持心跳间隔
     gLOG_REPL_TIMEOUT_HEARTBEAT     = 1000    // (毫秒)数据同步检测心跳间隔(数据包括kv数据及service数据)
     gLOG_REPL_AUTOSAVE_INTERVAL     = 2000    // (毫秒)数据自动物理化保存的间隔
-    gLOG_REPL_LOGCLEAN_INTERVAL     = 5000    // (毫秒)数据同步时的日志清理间隔
     gLOG_REPL_PEERS_INTERVAL        = 3000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL  = 2000    // (毫秒)健康检查默认间隔
 

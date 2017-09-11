@@ -11,6 +11,7 @@ import (
     "g/os/glog"
     "sync/atomic"
     "time"
+    "fmt"
 )
 
 // 集群数据同步接口回调函数
@@ -251,7 +252,7 @@ func (n *Node) onMsgReplUpdate(conn net.Conn, msg *Msg) {
 func (n *Node) saveLogEntry(entry LogEntry) {
     lastLogId := n.getLastLogId()
     if entry.Id < lastLogId {
-        glog.Warning("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId)
+        glog.Warning(fmt.Sprintf("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId))
         return
     }
     switch entry.Act {
@@ -312,7 +313,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
     // 如果增量同步的数据量大小超过DataMap的大小，那么直接采用全量模式，否则采用增量模式
     // 注意这里的logid都除以10000是因为logid的后四位是随机数，用以降低冲突的可能性，不是真实的id
     // 如果数据量大支持分批同步，每一次增量同步大小不超过10万条
-    if n.getLastLogId()/10000 - msg.Info.LastLogId/10000 < int64(n.DataMap.Size()) {
+    if (n.getLastLogId()/10000 - msg.Info.LastLogId/10000 < int64(n.DataMap.Size())) && n.isValidLogId(msg.Info.LastLogId) {
         for {
             list    := n.getLogEntriesByLastLogId(msg.Info.LastLogId, 100000)
             length  := len(list)

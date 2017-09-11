@@ -564,6 +564,18 @@ func (n *Node) getServiceFilePath() string {
     return path
 }
 
+// 根据logid计算数据存储的文件绝对路径，每个数据日志文件最大存储100万条记录
+func (n *Node) getLogEntryFileSavePathById(id int64) string {
+    r := int(id/10000/1000000)
+    if r == 0 {
+        r = 1
+    }
+    n.mutex.RLock()
+    path := n.SavePath + gfile.Separator + fmt.Sprintf("gluster.entry.%d.db", r)
+    n.mutex.RUnlock()
+    return path
+}
+
 func (n *Node) getDataDirty() bool {
     n.mutex.RLock()
     r := n.IsDataDirty

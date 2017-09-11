@@ -10,11 +10,13 @@ import (
     "g/os/glog"
     "g/encoding/gcompress"
     "sync"
+    "fmt"
 )
 
 // 日志自动保存处理
 func (n *Node) autoSavingHandler() {
     for {
+        go n.saveLogList()
         go n.savePeersToFile()
         if n.getDataDirty() {
             go func() {
@@ -30,6 +32,38 @@ func (n *Node) autoSavingHandler() {
         }
         time.Sleep(gLOG_REPL_AUTOSAVE_INTERVAL * time.Millisecond)
     }
+}
+
+// 定期物理化存储已经同步完毕的日志列表，注意：***leader和follower都需要清理***
+// 获取所有已存活的节点的最小日志ID，保存本地日志列表中比该ID小的记录，如果非最小id，表明数据当前急需同步到其他节点
+func (n *Node) saveLogList() {
+    minLogId := n.getMinLogIdFromPeers()
+    if minLogId == 0 {
+        return
+    }
+    //n.LogList.RLock()
+    p := n.LogList.Back()
+    for p != nil {
+        entry := p.Value.(LogEntry)
+        if entry.Id <= minLogId {
+            t   := p.Prev()
+            s   := fmt.Sprintf("%v,%v,%s\n", entry.Id, entry.Act, gjson.Encode(entry.Items))
+            c   := []byte(s)
+            if gCOMPRESS_SAVING {
+                c = gcompress.Zlib(c)
+            }
+            err := gfile.PutBinContentsAppend(n.getLogEntryFileSavePathById(entry.Id), c)
+            if err == nil {
+                n.LogList.Remove(p)
+            } else {
+                glog.Error("save data entry error:", err)
+            }
+            p = t
+        } else {
+            break;
+        }
+    }
+    //n.LogList.RUnlock()
 }
 
 // 保存Peers到磁盘
