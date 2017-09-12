@@ -9,7 +9,8 @@ import (
     "g/core/types/gset"
     "g/os/gfile"
     "os"
-    "strconv"
+    "bufio"
+    "encoding/json"
 )
 
 // leader到其他节点的数据同步监听
@@ -112,7 +113,8 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
         array := make([]LogEntry, 0)
         // 首先从内存中获取
         //n.LogList.RLock()
-        l := n.LogList.Back()
+        match := false
+        l     := n.LogList.Back()
         for l != nil {
             // 最大获取条数控制
             if len(array) == max {
@@ -120,51 +122,73 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
             }
             r := l.Value.(LogEntry)
             if r.Id > id {
-                array = append(array, r)
-                l = l.Prev()
-            } else {
-                break;
+                match = true
+            } else if r.Id > id {
+                if match {
+                    array = append(array, r)
+                } else {
+                    break;
+                }
             }
+            l = l.Prev()
         }
         //n.LogList.RUnlock()
         // 如果当前内存中的数据不够，那么从文件中读取剩余数据
         if len(array) < max && array[len(array) - 1].Id < id {
-            path      := n.getLogEntryFileSavePathById(id)
-            file, err := gfile.OpenWithFlag(path, os.O_RDONLY)
-            if err == nil {
-                defer file.Close()
-                start := int64(0)
-                for {
-                    offset := gfile.GetNextCharOffset(file, ",", start)
-                    if offset < 1 {
-                        break;
-                    }
-                    r  := gfile.GetBinContentByTwoOffsets(file, start, offset - 1)
-                    if r != nil {
-                        logid, _ := strconv.ParseInt(string(r), 10, 64)
-                        if logid > id {
-                            offset2  := gfile.GetNextCharOffset(file, ",", offset + 1)
-                            r2       := gfile.GetBinContentByTwoOffsets(file, offset + 1, offset2 - 1)
-                            actid, _ := strconv.Atoi(string(r2))
-                            offset3  := gfile.GetNextCharOffset(file, "\n", offset2 + 1)
-                            r3       := gfile.GetBinContentByTwoOffsets(file, offset2 + 1, offset3 - 1)
-                            items    := string(r3)
-                            array     = append(array, LogEntry{
-                                Id    : logid,
-                                Act   : actid,
-                                Items : gjson.Decode(items),
-                            })
-                            start = offset3 + 1
-                        } else {
-                            break;
-                        }
-                    }
-                }
+            left   := max - len(array)
+            start  := array[len(array) - 1].Id
+            result := n.getLogEntryListFromFileByLogId(start, id, left)
+            if result != nil && len(result) > 0 {
+                array = append(array, result...)
             }
         }
         return array
     }
     return nil
+}
+
+// 从文件中获取指定logid之后max数量的数据
+func (n *Node) getLogEntryListFromFileByLogId(start int64, logid int64, max int) []LogEntry {
+    id    := start
+    match := false
+    array := make([]LogEntry, 0)
+    for {
+        path      := n.getLogEntryFileSavePathById(id)
+        file, err := gfile.OpenWithFlag(path, os.O_RDONLY)
+        if err == nil {
+            defer file.Close()
+            buffer := bufio.NewReader(file)
+            for {
+                if len(array) == max {
+                    return array
+                }
+                line, _, err := buffer.ReadLine()
+                if err == nil {
+                    var entry LogEntry
+                    if err := json.Unmarshal(line, &entry); err == nil {
+                        if entry.Id == logid {
+                            match = true
+                        } else if entry.Id > logid {
+                            if match {
+                                array = append(array, entry)
+                            } else {
+                                break;
+                            }
+                        }
+                    } else {
+                        return array
+                    }
+                } else {
+                    return array
+                }
+            }
+        } else {
+            break;
+        }
+        // 下一批次
+        id += gLOGENTRY_FILE_SIZE
+    }
+    return array
 }
 
 // 由于在数据量比较大的情况下，会引起多次同步，因此必需判断给定的logid是否是一个合法的logid，以便后续进程能够保证同步是有效合理的
@@ -196,26 +220,20 @@ func (n *Node) isValidLogId(id int64) bool {
     file, err := gfile.OpenWithFlag(path, os.O_RDONLY)
     if err == nil {
         defer file.Close()
-        start := int64(0)
+        buffer := bufio.NewReader(file)
         for {
-            offset := gfile.GetNextCharOffset(file, ",", start)
-            r      := gfile.GetBinContentByTwoOffsets(file, start, offset)
-            if r != nil {
-                tempid, err := strconv.ParseInt(string(r), 10, 64)
-                if err != nil {
-                    return false
+            line, _, err := buffer.ReadLine()
+            if err == nil {
+                var entry LogEntry
+                if json.Unmarshal(line, &entry) == nil {
+                    if entry.Id == id {
+                        return true
+                    } else if entry.Id > id {
+                        return false
+                    }
                 }
-                if tempid == id {
-                    return true
-                } else if tempid > id {
-                    return false
-                }
-                start = gfile.GetNextCharOffset(file, "\n", offset)
-                if start == 0 {
-                    return false
-                } else {
-                    start = start + 1
-                }
+            } else {
+                break;
             }
         }
     }

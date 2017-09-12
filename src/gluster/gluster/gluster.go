@@ -20,7 +20,6 @@ import (
     "encoding/json"
     "time"
     "io"
-    "g/util/gutil"
     "g/net/gip"
     "strings"
     "g/encoding/gmd5"
@@ -29,76 +28,77 @@ import (
 )
 
 const (
-    gVERSION                        = "0.8"   // 当前版本
-    gCOMPRESS_COMMUNICATION         = true    // 是否在通信时进行内容压缩
-    gCOMPRESS_SAVING                = false   // 是否在存储时压缩内容(由于LogEntry文件检索的需要，暂时都不做压缩处理)
+    gVERSION                                = "0.8"   // 当前版本
+    gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
+    gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容
+    gLOGENTRY_FILE_SIZE                     = 10000   // 每个LogEntry存储文件的最大存储数量
     // 集群端口定义
-    gPORT_RAFT                      = 4166    // 集群协议通信接口
-    gPORT_REPL                      = 4167    // 集群数据同步接口
-    gPORT_API                       = 4168    // 服务器对外API接口
-    gPORT_MONITOR                   = 4169    // 监控服务接口
-    gPORT_WEBUI                     = 4170    // WEB管理界面
+    gPORT_RAFT                              = 4166    // 集群协议通信接口
+    gPORT_REPL                              = 4167    // 集群数据同步接口
+    gPORT_API                               = 4168    // 服务器对外API接口
+    gPORT_MONITOR                           = 4169    // 监控服务接口
+    gPORT_WEBUI                             = 4170    // WEB管理界面
 
     // 节点状态
-    gSTATUS_DEAD                    = 0
-    gSTATUS_ALIVE                   = 1
+    gSTATUS_DEAD                            = 0
+    gSTATUS_ALIVE                           = 1
 
     // 集群角色
-    gROLE_SERVER                    = 0
-    gROLE_CLIENT                    = 1
-    gROLE_MONITOR                   = 2
+    gROLE_SERVER                            = 0
+    gROLE_CLIENT                            = 1
+    gROLE_MONITOR                           = 2
 
     // RAFT角色
-    gROLE_RAFT_FOLLOWER             = 0
-    gROLE_RAFT_CANDIDATE            = 1
-    gROLE_RAFT_LEADER               = 2
+    gROLE_RAFT_FOLLOWER                     = 0
+    gROLE_RAFT_CANDIDATE                    = 1
+    gROLE_RAFT_LEADER                       = 2
 
     // 超时时间设置
-    gTCP_RETRY_COUNT                = 3       // TCP请求失败时的重试次数
-    gTCP_READ_TIMEOUT               = 3000    // (毫秒)TCP链接读取超时
-    gTCP_WRITE_TIMEOUT              = 3000    // (毫秒)TCP链接写入超时
-    gELECTION_TIMEOUT               = 1000    // (毫秒)RAFT选举超时时间
-    gELECTION_TIMEOUT_HEARTBEAT     = 500     // (毫秒)RAFT Leader统治维持心跳间隔
-    gLOG_REPL_TIMEOUT_HEARTBEAT     = 1000    // (毫秒)数据同步检测心跳间隔(数据包括kv数据及service数据)
-    gLOG_REPL_AUTOSAVE_INTERVAL     = 2000    // (毫秒)数据自动物理化保存的间隔
-    gLOG_REPL_PEERS_INTERVAL        = 3000    // (毫秒)Peers节点信息同步(非完整同步)
-    gSERVICE_HEALTH_CHECK_INTERVAL  = 2000    // (毫秒)健康检查默认间隔
+    gTCP_RETRY_COUNT                        = 3       // TCP请求失败时的重试次数
+    gTCP_READ_TIMEOUT                       = 3000    // (毫秒)TCP链接读取超时
+    gTCP_WRITE_TIMEOUT                      = 3000    // (毫秒)TCP链接写入超时
+    gELECTION_TIMEOUT                       = 1000    // (毫秒)RAFT选举超时时间
+    gELECTION_TIMEOUT_HEARTBEAT             = 500     // (毫秒)RAFT Leader统治维持心跳间隔
+    gLOG_REPL_TIMEOUT_HEARTBEAT             = 1000    // (毫秒)数据同步检测心跳间隔(数据包括kv数据及service数据)
+    gLOG_REPL_AUTOSAVE_INTERVAL             = 2000    // (毫秒)数据自动物理化保存的间隔
+    gLOG_REPL_PEERS_INTERVAL                = 3000    // (毫秒)Peers节点信息同步(非完整同步)
+    gSERVICE_HEALTH_CHECK_INTERVAL          = 2000    // (毫秒)健康检查默认间隔
 
     // RAFT操作
-    gMSG_RAFT_HI                    = 110
-    gMSG_RAFT_HI2                   = 120
-    gMSG_RAFT_RESPONSE              = 130
-    gMSG_RAFT_HEARTBEAT             = 140
-    gMSG_RAFT_I_AM_LEADER           = 150
-    gMSG_RAFT_SPLIT_BRAINS_CHECK    = 160
-    gMSG_RAFT_SPLIT_BRAINS_UNSET    = 170
-    gMSG_RAFT_SPLIT_BRAINS_CHANGE   = 175
-    gMSG_RAFT_SCORE_REQUEST         = 180
-    gMSG_RAFT_SCORE_COMPARE_REQUEST = 190
-    gMSG_RAFT_SCORE_COMPARE_FAILURE = 200
-    gMSG_RAFT_SCORE_COMPARE_SUCCESS = 210
+    gMSG_RAFT_HI                            = 110
+    gMSG_RAFT_HI2                           = 120
+    gMSG_RAFT_RESPONSE                      = 130
+    gMSG_RAFT_HEARTBEAT                     = 140
+    gMSG_RAFT_I_AM_LEADER                   = 150
+    gMSG_RAFT_SPLIT_BRAINS_CHECK            = 160
+    gMSG_RAFT_SPLIT_BRAINS_UNSET            = 170
+    gMSG_RAFT_SPLIT_BRAINS_CHANGE           = 180
+    gMSG_RAFT_SCORE_REQUEST                 = 190
+    gMSG_RAFT_SCORE_COMPARE_REQUEST         = 200
+    gMSG_RAFT_SCORE_COMPARE_FAILURE         = 210
+    gMSG_RAFT_SCORE_COMPARE_SUCCESS         = 220
 
     // 数据同步操作
-    gMSG_REPL_DATA_SET                      = 310
-    gMSG_REPL_DATA_REMOVE                   = 320
-    gMSG_REPL_INCREMENTAL_UPDATE            = 330
-    gMSG_REPL_COMPLETELY_UPDATE             = 340
-    gMSG_REPL_HEARTBEAT                     = 350
-    gMSG_REPL_FAILED                        = 355
+    gMSG_REPL_DATA_SET                      = 300
+    gMSG_REPL_DATA_REMOVE                   = 310
+    gMSG_REPL_INCREMENTAL_UPDATE            = 320
+    gMSG_REPL_COMPLETELY_UPDATE             = 330
+    gMSG_REPL_HEARTBEAT                     = 340
+    gMSG_REPL_FAILED                        = 350
     gMSG_REPL_RESPONSE                      = 360
     gMSG_REPL_PEERS_UPDATE                  = 370
-    gMSG_REPL_NEED_UPDATE_LEADER            = 375
-    gMSG_REPL_NEED_UPDATE_FOLLOWER          = 380
-    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 383
-    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 385
-    gMSG_REPL_SERVICE_NEED_UPDATE_LEADER    = 390
-    gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER  = 400
+    gMSG_REPL_NEED_UPDATE_LEADER            = 380
+    gMSG_REPL_NEED_UPDATE_FOLLOWER          = 390
+    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 400
+    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 410
+    gMSG_REPL_SERVICE_NEED_UPDATE_LEADER    = 420
+    gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER  = 430
 
     // API相关
-    gMSG_API_PEERS_ADD                      = 520
-    gMSG_API_PEERS_REMOVE                   = 530
-    gMSG_API_SERVICE_SET                    = 540
-    gMSG_API_SERVICE_REMOVE                 = 550
+    gMSG_API_PEERS_ADD                      = 500
+    gMSG_API_PEERS_REMOVE                   = 510
+    gMSG_API_SERVICE_SET                    = 520
+    gMSG_API_SERVICE_REMOVE                 = 530
 )
 
 // 消息
@@ -110,7 +110,8 @@ type Msg struct {
 
 // 服务器节点信息
 type Node struct {
-    mutex               sync.RWMutex             // 通用锁，可以考虑不同的变量使用不同的锁以提高读写效率
+    mutex               sync.RWMutex             // 通用锁，可以使用不同的锁来控制对应变量以提高读写效率
+    dmutex              sync.RWMutex             // DataMap锁，用以保证KV请求的先进先出队列执行
 
     Group               string                   // 集群名称
     Id                  string                   // 节点ID(根据算法自动生成的集群唯一名称)
@@ -295,11 +296,11 @@ func Receive(conn net.Conn) []byte {
             time.Sleep(100 * time.Millisecond)
         } else {
             if length == buffersize {
-                data = gutil.MergeSlice(data, buffer)
+                data = append(data, buffer...)
                 // 如果读取的数据太大，需要延迟超时时间
                 conn.SetReadDeadline(time.Now().Add(gTCP_READ_TIMEOUT * time.Millisecond))
             } else {
-                data = gutil.MergeSlice(data, buffer[0:length])
+                data = append(data, buffer[0:length]...)
                 break;
             }
             if err == io.EOF {

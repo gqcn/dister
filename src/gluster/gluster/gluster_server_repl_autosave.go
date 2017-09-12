@@ -10,7 +10,7 @@ import (
     "g/os/glog"
     "g/encoding/gcompress"
     "sync"
-    "fmt"
+    "encoding/json"
 )
 
 // 日志自动保存处理
@@ -46,13 +46,14 @@ func (n *Node) saveLogList() {
     for p != nil {
         entry := p.Value.(LogEntry)
         if entry.Id <= minLogId {
-            t   := p.Prev()
-            s   := fmt.Sprintf("%v,%v,%s\n", entry.Id, entry.Act, gjson.Encode(entry.Items))
-            c   := []byte(s)
-            if gCOMPRESS_SAVING {
-                c = gcompress.Zlib(c)
+            t      := p.Prev()
+            s, err := json.Marshal(entry)
+            if err != nil {
+                glog.Error("json marshal log entry error:", err)
+                break;
             }
-            err := gfile.PutBinContentsAppend(n.getLogEntryFileSavePathById(entry.Id), c)
+            s   = append(s, 10)
+            err = gfile.PutBinContentsAppend(n.getLogEntryFileSavePathById(entry.Id), s)
             if err == nil {
                 n.LogList.Remove(p)
             } else {

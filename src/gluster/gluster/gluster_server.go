@@ -138,7 +138,7 @@ func (n *Node) initFromCommand() {
     // 数据保存路径(请保证运行gcluster的用户有权限写入)
     savepath := gconsole.Option.Get("SavePath")
     if savepath != "" {
-        n.setSavePathFromConfig(savepath)
+        n.SetSavePath(savepath)
     }
     // 日志保存路径
     logpath := gconsole.Option.Get("LogPath")
@@ -210,9 +210,10 @@ func (n *Node) initFromCfg() {
     }
     // 数据保存路径(请保证运行gcluster的用户有权限写入)
     savepath := j.GetString("SavePath")
-    if savepath != "" {
-        n.setSavePathFromConfig(savepath)
+    if savepath == "" {
+        savepath = n.getSavePath()
     }
+    n.setSavePathFromConfig(savepath)
     // 日志保存路径
     logpath := j.GetString("LogPath")
     if logpath != "" {
@@ -252,7 +253,11 @@ func (n *Node) setSavePathFromConfig(savepath string) {
     if !gfile.IsWritable(savepath) {
         glog.Fatalln(savepath, "is not writable for saving data")
     }
-    n.SetSavePath(strings.TrimRight(savepath, gfile.Separator))
+    dbpath := strings.TrimRight(savepath, gfile.Separator) + gfile.Separator + "gluster.db"
+    if !gfile.Exists(dbpath) {
+        gfile.Mkdir(dbpath)
+    }
+    n.SetSavePath(dbpath)
 }
 
 // 从配置中设置LogPath
@@ -385,7 +390,7 @@ func (n *Node) sayHiToLocalLan() {
         return
     }
     if segment == "127.0.0" {
-        glog.Error("there're multiple ips in this host, bind one to make scan work, exit scanning")
+        glog.Error("there're multiple ip addresses in this host, bind one to make scan work, exit scanning")
         return
     }
     for i := 1; i < 256; i++ {
@@ -469,6 +474,13 @@ func (n *Node) getIp() string {
 func (n *Node) getName() string {
     n.mutex.RLock()
     r := n.Name
+    n.mutex.RUnlock()
+    return r
+}
+
+func (n *Node) getSavePath() string {
+    n.mutex.RLock()
+    r := n.SavePath
     n.mutex.RUnlock()
     return r
 }
@@ -564,9 +576,9 @@ func (n *Node) getServiceFilePath() string {
     return path
 }
 
-// 根据logid计算数据存储的文件绝对路径，每个数据日志文件最大存储100万条记录
+// 根据logid计算数据存储的文件绝对路径，每个数据日志文件最大存储10万条记录
 func (n *Node) getLogEntryFileSavePathById(id int64) string {
-    r := int(id/10000/1000000)
+    r := int(id/10000/gLOGENTRY_FILE_SIZE)
     if r == 0 {
         r = 1
     }
