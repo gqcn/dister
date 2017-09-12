@@ -77,15 +77,15 @@ func (n *Node) Run() {
 
     // 显示当前节点信息
     fmt.Printf( "gluster version %s, start running...\n", gVERSION)
-    fmt.Println("===============================================================================")
+    fmt.Println("==================================================================================")
     fmt.Println("Host Id       :", n.Id)
     fmt.Println("Host Role     :", roleName(n.Role))
     fmt.Println("Host Name     :", n.Name)
     fmt.Println("Host Group    :", n.Group)
     fmt.Println("Host LogPath  :", glog.GetLogPath())
-    fmt.Println("Host SavePath :", n.SavePath)
+    fmt.Println("Host SavePath :", n.getSavePath())
     fmt.Println("Group MinNode :", n.MinNode)
-    fmt.Println("===============================================================================")
+    fmt.Println("==================================================================================")
 
     // 创建接口监听
     go gtcp.NewServer(fmt.Sprintf(":%d", gPORT_RAFT),  n.raftTcpHandler).Run()
@@ -137,9 +137,10 @@ func (n *Node) initFromCommand() {
     }
     // 数据保存路径(请保证运行gcluster的用户有权限写入)
     savepath := gconsole.Option.Get("SavePath")
-    if savepath != "" {
-        n.SetSavePath(savepath)
+    if savepath == "" {
+        savepath = n.getSavePath()
     }
+    n.setSavePathFromConfig(savepath)
     // 日志保存路径
     logpath := gconsole.Option.Get("LogPath")
     if logpath != "" {
@@ -210,10 +211,9 @@ func (n *Node) initFromCfg() {
     }
     // 数据保存路径(请保证运行gcluster的用户有权限写入)
     savepath := j.GetString("SavePath")
-    if savepath == "" {
-        savepath = n.getSavePath()
+    if savepath != "" {
+        n.SetSavePath(savepath)
     }
-    n.setSavePathFromConfig(savepath)
     // 日志保存路径
     logpath := j.GetString("LogPath")
     if logpath != "" {

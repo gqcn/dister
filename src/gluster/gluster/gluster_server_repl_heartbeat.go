@@ -112,32 +112,37 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
     if n.getLastLogId() > id {
         array := make([]LogEntry, 0)
         // 首先从内存中获取
-        //n.LogList.RLock()
-        match := false
-        l     := n.LogList.Back()
-        for l != nil {
-            // 最大获取条数控制
-            if len(array) == max {
-                break;
-            }
-            r := l.Value.(LogEntry)
-            if r.Id > id {
+        if n.LogList.Len() > 0 {
+            //n.LogList.RLock()
+            match := false
+            if id == 0 {
                 match = true
-            } else if r.Id > id {
-                if match {
-                    array = append(array, r)
-                } else {
+            }
+            l := n.LogList.Back()
+            for l != nil {
+                // 最大获取条数控制
+                if len(array) == max {
                     break;
                 }
+                r := l.Value.(LogEntry)
+                if r.Id > id {
+                    match = true
+                } else if r.Id > id {
+                    if match {
+                        array = append(array, r)
+                    } else {
+                        break;
+                    }
+                }
+                l = l.Prev()
             }
-            l = l.Prev()
+            //n.LogList.RUnlock()
         }
-        //n.LogList.RUnlock()
         // 如果当前内存中的数据不够，那么从文件中读取剩余数据
-        if len(array) < max && array[len(array) - 1].Id < id {
-            left   := max - len(array)
-            start  := array[len(array) - 1].Id
-            result := n.getLogEntryListFromFileByLogId(start, id, left)
+        length := len(array)
+        if length < 1 || (length < max && array[length - 1].Id < id) {
+            left   := max - length
+            result := n.getLogEntryListFromFileByLogId(id, left)
             if result != nil && len(result) > 0 {
                 array = append(array, result...)
             }
@@ -148,9 +153,12 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
 }
 
 // 从文件中获取指定logid之后max数量的数据
-func (n *Node) getLogEntryListFromFileByLogId(start int64, logid int64, max int) []LogEntry {
-    id    := start
+func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
+    id    := logid
     match := false
+    if logid == 0 {
+        match = true
+    }
     array := make([]LogEntry, 0)
     for {
         path      := n.getLogEntryFileSavePathById(id)
@@ -166,7 +174,7 @@ func (n *Node) getLogEntryListFromFileByLogId(start int64, logid int64, max int)
                 if err == nil {
                     var entry LogEntry
                     if err := json.Unmarshal(line, &entry); err == nil {
-                        if entry.Id == logid {
+                        if !match && entry.Id == logid {
                             match = true
                         } else if entry.Id > logid {
                             if match {

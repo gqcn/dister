@@ -31,7 +31,7 @@ const (
     gVERSION                                = "0.8"   // 当前版本
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容
-    gLOGENTRY_FILE_SIZE                     = 10000   // 每个LogEntry存储文件的最大存储数量
+    gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量
     // 集群端口定义
     gPORT_RAFT                              = 4166    // 集群协议通信接口
     gPORT_REPL                              = 4167    // 集群数据同步接口
@@ -54,7 +54,7 @@ const (
     gROLE_RAFT_LEADER                       = 2
 
     // 超时时间设置
-    gTCP_RETRY_COUNT                        = 3       // TCP请求失败时的重试次数
+    gTCP_RETRY_COUNT                        = 0       // TCP请求失败时的重试次数
     gTCP_READ_TIMEOUT                       = 3000    // (毫秒)TCP链接读取超时
     gTCP_WRITE_TIMEOUT                      = 3000    // (毫秒)TCP链接写入超时
     gELECTION_TIMEOUT                       = 1000    // (毫秒)RAFT选举超时时间
@@ -299,6 +299,8 @@ func Receive(conn net.Conn) []byte {
                 data = append(data, buffer...)
                 // 如果读取的数据太大，需要延迟超时时间
                 conn.SetReadDeadline(time.Now().Add(gTCP_READ_TIMEOUT * time.Millisecond))
+                // 这句很重要，用于等待缓冲区数据，以便下一次读取，如果马上读取在大数据请求的情况下会引起数据被截断
+                time.Sleep(time.Millisecond)
             } else {
                 data = append(data, buffer[0:length]...)
                 break;
@@ -311,12 +313,13 @@ func Receive(conn net.Conn) []byte {
     if gCOMPRESS_COMMUNICATION {
         return gcompress.UnZlib(data)
     }
+
     return data
 }
 
 // 发送数据
 func Send(conn net.Conn, data []byte) error {
-    conn.SetReadDeadline(time.Now().Add(gTCP_WRITE_TIMEOUT * time.Millisecond))
+    //conn.SetReadDeadline(time.Now().Add(gTCP_WRITE_TIMEOUT * time.Millisecond))
     retry := 0
     for {
         if gCOMPRESS_COMMUNICATION {
@@ -327,7 +330,6 @@ func Send(conn net.Conn, data []byte) error {
             if retry > gTCP_RETRY_COUNT - 1 {
                 return err
             }
-            //glog.Println("data send:", err, "try:", retry)
             retry ++
             time.Sleep(100 * time.Millisecond)
         } else {
@@ -339,7 +341,6 @@ func Send(conn net.Conn, data []byte) error {
 // 获取Msg
 func RecieveMsg(conn net.Conn) *Msg {
     data := Receive(conn)
-    //glog.Println(string(data))
     if data != nil && len(data) > 0 {
         var msg Msg
         err := json.Unmarshal(data, &msg)
