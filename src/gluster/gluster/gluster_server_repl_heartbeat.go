@@ -53,11 +53,8 @@ func (n *Node) dataReplicationLoop() {
                             // 如果当前节点正处于数据同步中，那么本次心跳不再执行任何的数据同步判断
                             if !n.getStatusInReplication() {
                                 switch msg.Head {
-                                    case gMSG_REPL_INCREMENTAL_UPDATE:              n.updateDataFromRemoteNode(conn, msg)
-                                    case gMSG_REPL_COMPLETELY_UPDATE:               n.updateDataFromRemoteNode(conn, msg)
-                                    case gMSG_REPL_NEED_UPDATE_FOLLOWER:            n.updateDataToRemoteNode(conn, msg)
-                                    case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:       n.updateServiceFromRemoteNode(conn, msg)
-                                    case gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER:    n.updateServiceToRemoteNode(conn, msg)
+                                    case gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER:         n.updateDataToRemoteNode(conn, msg)
+                                    case gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER: n.updateServiceToRemoteNode(conn, msg)
                                 }
                             }
                             time.Sleep(gLOG_REPL_TIMEOUT_HEARTBEAT * time.Millisecond)
@@ -213,7 +210,7 @@ func (n *Node) isValidLogId(id int64) bool {
             r := l.Value.(LogEntry)
             if r.Id == id {
                 return true
-            } else if r.Id > id {
+            } else if r.Id < id {
                 l = l.Prev()
             } else {
                 return false

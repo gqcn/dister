@@ -15,11 +15,7 @@ func (n *Node) raftTcpHandler(conn net.Conn) {
     }
     // 保存peers
     if msg.Info.Id != n.Id {
-        if n.Peers.Contains(msg.Info.Id) {
-            n.updatePeerStatus(msg.Info.Id, gSTATUS_ALIVE)
-        } else {
-            n.updatePeerInfo(msg.Info)
-        }
+        n.updatePeerInfo(msg.Info)
     }
     // 消息处理
     switch msg.Head {

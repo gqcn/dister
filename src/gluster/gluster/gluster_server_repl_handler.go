@@ -29,8 +29,7 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
         case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
-        case gMSG_REPL_INCREMENTAL_UPDATE:          n.onMsgReplUpdate(conn, msg)
-        case gMSG_REPL_COMPLETELY_UPDATE:           n.onMsgReplUpdate(conn, msg)
+        case gMSG_REPL_DATA_INCREMENTAL_UPDATE:     n.onMsgReplUpdate(conn, msg)
         case gMSG_REPL_CONFIG_FROM_FOLLOWER     :   n.onMsgConfigFromFollower(conn, msg)
         case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:   n.onMsgServiceCompletelyUpdate(conn, msg)
         case gMSG_API_SERVICE_SET:                  n.onMsgServiceSet(conn, msg)
@@ -135,24 +134,24 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
         var items interface{}
         if gjson.DecodeTo(msg.Body, &items) == nil {
             n.dmutex.Lock()
-                var entry = LogEntry {
-                    Id    : n.makeLogId(),
-                    Act   : msg.Head,
-                    Items : items,
-                }
-                n.saveLogEntry(entry)
-                n.LogList.PushFront(entry)
-                if !n.sendLogEntryToPeers(entry) {
-                    result = gMSG_REPL_FAILED
-                }
+            var entry = LogEntry {
+                Id    : n.makeLogId(),
+                Act   : msg.Head,
+                Items : items,
+            }
+            n.saveLogEntry(entry)
+            if !n.sendLogEntryToPeers(entry) {
+                result = gMSG_REPL_FAILED
+            }
             n.dmutex.Unlock()
+        } else {
+            result = gMSG_REPL_FAILED
         }
     } else {
         var entry LogEntry
         if gjson.DecodeTo(msg.Body, &entry) == nil {
             n.dmutex.Lock()
-                n.saveLogEntry(entry)
-                n.LogList.PushFront(entry)
+            n.saveLogEntry(entry)
             n.dmutex.Unlock()
         } else {
             result = gMSG_REPL_FAILED
@@ -218,34 +217,22 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
 }
 
 // 心跳响应，用于数据的同步，包括：Peers、DataMap、Service
+// 只允许leader->follower的数据同步
 func (n *Node) onMsgReplHeartbeat(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_HEARTBEAT
     // 如果当前节点正处于数据同步中，那么本次心跳不再执行同步判断
     if !n.getStatusInReplication() {
-        lastLogId := n.getLastLogId()
-        if lastLogId < msg.Info.LastLogId {
-            result = gMSG_REPL_NEED_UPDATE_FOLLOWER
-        } else if lastLogId > msg.Info.LastLogId {
-            result = gMSG_REPL_NEED_UPDATE_LEADER
-        } else {
-            // service同步检测
-            lastServiceLogId := n.getLastServiceLogId()
-            if lastServiceLogId < msg.Info.LastServiceLogId {
-                result = gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER
-            } else if lastServiceLogId > msg.Info.LastServiceLogId {
-                result = gMSG_REPL_SERVICE_NEED_UPDATE_LEADER
-            }
+        if n.getLastLogId() < msg.Info.LastLogId {
+            // 数据同步检测
+            result = gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER
+        } else if n.getLastServiceLogId() < msg.Info.LastServiceLogId {
+            // Service同步检测
+            result = gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER
         }
     } else {
         //glog.Println("status in replication, quit replication check")
     }
-
-    switch result {
-        case gMSG_REPL_NEED_UPDATE_LEADER:          n.updateDataToRemoteNode(conn, msg)
-        case gMSG_REPL_SERVICE_NEED_UPDATE_LEADER:  n.updateServiceToRemoteNode(conn, msg)
-        default:
-            n.sendMsg(conn, result, "")
-    }
+    n.sendMsg(conn, result, "")
 }
 
 // 数据同步，更新本地数据
@@ -262,6 +249,7 @@ func (n *Node) saveLogEntry(entry LogEntry) {
         glog.Warning(fmt.Sprintf("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId))
         return
     }
+    n.LogList.PushFront(entry)
     switch entry.Act {
         case gMSG_REPL_DATA_SET:
             //glog.Println("setting log entry", entry)
@@ -299,32 +287,34 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
 
     // 支持分批同步，如果数据量大，每一次增量同步大小不超过10万条
     logid := msg.Info.LastLogId
-    if msg.Info.LastLogId == 0 || n.isValidLogId(logid) {
-        glog.Println("start data incremental replication from", n.getName(), "to", msg.Info.Name)
-        for {
-            list    := n.getLogEntriesByLastLogId(logid, 10000)
-            length  := len(list)
-            if length > 0 {
-                glog.Println("data incremental replication start logid:", list[0].Id, ", end logid:", list[length-1].Id)
-                if err := n.sendMsg(conn, gMSG_REPL_INCREMENTAL_UPDATE, gjson.Encode(list)); err != nil {
-                    glog.Error(err)
-                    return
-                }
-                if rmsg := n.receiveMsg(conn); rmsg != nil {
-                    logid = rmsg.Info.LastLogId
-                    if n.getLastLogId() == logid {
-                        break;
+    if n.getLastLogId() > msg.Info.LastLogId {
+        if logid == 0 || (logid != 0 && n.isValidLogId(logid)) {
+            glog.Println("start data incremental replication from", n.getName(), "to", msg.Info.Name)
+            for {
+                list    := n.getLogEntriesByLastLogId(logid, 10000)
+                length  := len(list)
+                if length > 0 {
+                    glog.Println("data incremental replication start logid:", list[0].Id, ", end logid:", list[length-1].Id)
+                    if err := n.sendMsg(conn, gMSG_REPL_DATA_INCREMENTAL_UPDATE, gjson.Encode(list)); err != nil {
+                        glog.Error(err)
+                        return
+                    }
+                    if rmsg := n.receiveMsg(conn); rmsg != nil {
+                        logid = rmsg.Info.LastLogId
+                        if n.getLastLogId() == logid {
+                            break;
+                        }
+                    } else {
+                        break
                     }
                 } else {
+                    glog.Println("data incremental replication failed, logid:", logid)
                     break
                 }
-            } else {
-                glog.Println("data incremental replication failed, logid:", logid)
-                break
             }
+        } else {
+            glog.Println("failed in data replication from", n.getName(), "to", msg.Info.Name, ", invalid log id:", logid)
         }
-    } else {
-        glog.Println("failed in data replication from", n.getName(), "to", msg.Info.Name, ", invalid log id:", logid)
     }
 }
 

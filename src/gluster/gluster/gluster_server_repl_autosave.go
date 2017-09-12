@@ -37,7 +37,10 @@ func (n *Node) autoSavingHandler() {
 // 定期物理化存储已经同步完毕的日志列表，注意：***leader和follower都需要清理***
 // 获取所有已存活的节点的最小日志ID，保存本地日志列表中比该ID小的记录，如果非最小id，表明数据当前急需同步到其他节点
 func (n *Node) saveLogList() {
+    //glog.Println("log list size:", n.LogList.Len())
+    //glog.Println("last log id:", n.getLastLogId())
     minLogId := n.getMinLogIdFromPeers()
+    //glog.Println("min log id:", minLogId)
     if minLogId == 0 {
         return
     }
@@ -224,7 +227,6 @@ func (n *Node) updateFromLogEntriesJson(jsonContent string) error {
         for _, v := range array {
             if v.Id > n.getLastLogId() {
                 n.saveLogEntry(v)
-                n.LogList.PushFront(v)
             }
         }
     }

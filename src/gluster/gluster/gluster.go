@@ -81,18 +81,15 @@ const (
     // 数据同步操作
     gMSG_REPL_DATA_SET                      = 300
     gMSG_REPL_DATA_REMOVE                   = 310
-    gMSG_REPL_INCREMENTAL_UPDATE            = 320
-    gMSG_REPL_COMPLETELY_UPDATE             = 330
+    gMSG_REPL_DATA_INCREMENTAL_UPDATE       = 320
+    gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER     = 330
     gMSG_REPL_HEARTBEAT                     = 340
     gMSG_REPL_FAILED                        = 350
     gMSG_REPL_RESPONSE                      = 360
     gMSG_REPL_PEERS_UPDATE                  = 370
-    gMSG_REPL_NEED_UPDATE_LEADER            = 380
-    gMSG_REPL_NEED_UPDATE_FOLLOWER          = 390
-    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 400
-    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 410
-    gMSG_REPL_SERVICE_NEED_UPDATE_LEADER    = 420
-    gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER  = 430
+    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 380
+    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 390
+    gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER  = 400
 
     // API相关
     gMSG_API_PEERS_ADD                      = 500
