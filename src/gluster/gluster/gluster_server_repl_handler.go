@@ -139,8 +139,10 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
                 Act   : msg.Head,
                 Items : items,
             }
-            n.saveLogEntry(entry)
-            if !n.sendLogEntryToPeers(entry) {
+            // 只有节点同步成功后leader才更新数据到本地
+            if n.sendLogEntryToPeers(entry) {
+                n.saveLogEntry(entry)
+            } else {
                 result = gMSG_REPL_FAILED
             }
             n.dmutex.Unlock()
@@ -172,8 +174,6 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
             return false
         }
     }
-    n.setStatusInReplication(true)
-    defer n.setStatusInReplication(false)
 
     var scount     int32 = 0
     var fcount     int32 = 0
@@ -210,7 +210,7 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
         if atomic.LoadInt32(&fcount) == aliveCount {
             break;
         }
-        time.Sleep(time.Millisecond)
+        time.Sleep(200*time.Microsecond)
     }
 
     return result
@@ -270,21 +270,28 @@ func (n *Node) saveLogEntry(entry LogEntry) {
 }
 
 // 从目标节点同步数据，采用增量+全量模式
+// follower<-leader
 func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
     // 如果有goroutine正在同步，那么放弃本次同步
     if n.getStatusInReplication() {
         return
     }
+    n.setStatusInReplication(true)
+    defer n.setStatusInReplication(false)
     if n.getLastLogId() < msg.Info.LastLogId {
         n.updateFromLogEntriesJson(msg.Body)
     }
 }
 
 // 同步数据到目标节点，采用增量模式
+// leader->follower
 func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
+    // 如果正在进行数据同步，那么退出等待下次操作
+    if n.getStatusInReplication() {
+        return
+    }
     n.setStatusInReplication(true)
     defer n.setStatusInReplication(false)
-
     // 支持分批同步，如果数据量大，每一次增量同步大小不超过10万条
     logid := msg.Info.LastLogId
     if n.getLastLogId() > msg.Info.LastLogId {
@@ -319,6 +326,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
 }
 
 // 从目标节点同步Service数据
+// follower<-leader
 func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
     //glog.Println("receive service replication update from", msg.Info.Name)
     m   := make(map[string]ServiceStruct)
@@ -340,6 +348,7 @@ func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
 }
 
 // 同步Service到目标节点
+// leader->follower
 func (n *Node) updateServiceToRemoteNode(conn net.Conn, msg *Msg) {
     //glog.Println("send service replication update to", msg.Info.Name)
     if err := n.sendMsg(conn, gMSG_REPL_SERVICE_COMPLETELY_UPDATE, gjson.Encode(*n.ServiceForApi.Clone())); err != nil {
