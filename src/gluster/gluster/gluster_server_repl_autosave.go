@@ -226,6 +226,7 @@ func (n *Node) updateFromLogEntriesJson(jsonContent string) error {
     if array != nil && len(array) > 0 {
         for _, v := range array {
             if v.Id > n.getLastLogId() {
+                n.LogList.PushFront(v)
                 n.saveLogEntry(v)
             }
         }

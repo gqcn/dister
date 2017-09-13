@@ -63,7 +63,7 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
         n.setLeader(&msg.Info)
         n.setRaftRole(gROLE_RAFT_FOLLOWER)
     } else {
-        // 脑裂问题，集群节点规划或者网络异常造成
+        // 脑裂问题，集群节点规划或者网络异常造成，在集群正常运行中才有可能出现，选举中不会出现
         // 1、两个leader无法相互通信，那么两个leader处于不同的两个网络，因此需要将其中一个网络中的该follower剔除掉，只保留其在一个网络中
         // 2、两个leader可以相互通信，那么两个leader处于相同的网络，于是将两个leader相互比较，最终留下一个作为leader，另外一个作为follower
         if n.getLeader().Id != msg.Info.Id {
@@ -122,7 +122,7 @@ func (n *Node) onMsgRaftSplitBrainsCheck(conn net.Conn, msg *Msg) {
     n.sendMsg(conn, result, "")
 }
 
-// 选举比分获取
+// 选举比分获取，如果新加入的节点，也会进入到这个方法中
 func (n *Node) onMsgRaftScoreRequest(conn net.Conn, msg *Msg) {
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         n.sendMsg(conn, gMSG_RAFT_I_AM_LEADER, "")

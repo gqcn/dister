@@ -124,12 +124,12 @@ func (n *Node) onMsgReplDataRemove(conn net.Conn, msg *Msg) {
 }
 
 // kv设置，最终一致性
-// 这里增加了一把数据锁，以保证请求的先进先出队列执行
+// 这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
 func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     n.setStatusInReplication(true)
     defer n.setStatusInReplication(false)
 
-    result := gMSG_REPL_RESPONSE
+    result := gMSG_REPL_FAILED
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         var items interface{}
         if gjson.DecodeTo(msg.Body, &items) == nil {
@@ -139,33 +139,34 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
                 Act   : msg.Head,
                 Items : items,
             }
-            // 只有节点同步成功后leader才更新数据到本地
-            if n.sendLogEntryToPeers(entry) {
+            // 先保存日志，当节点同步成功后才真实写入数据
+            // 不用做重复性验证，即使失败了，客户端也需要做重试请求
+            n.LogList.PushFront(entry)
+            if n.sendLogEntryToPeers(entry, msg.Info.Id) {
                 n.saveLogEntry(entry)
-            } else {
-                result = gMSG_REPL_FAILED
+                result = gMSG_REPL_RESPONSE
             }
             n.dmutex.Unlock()
-        } else {
-            result = gMSG_REPL_FAILED
         }
     } else {
+        // follower需要使用缓存做等幂性处理，防止同一请求多次提交(特别是集群中部分节点失败的情况)
         var entry LogEntry
-        if gjson.DecodeTo(msg.Body, &entry) == nil {
+        if n.getLastLogId() == msg.Info.LastLogId && gjson.DecodeTo(msg.Body, &entry) == nil {
             n.dmutex.Lock()
+            n.LogList.PushFront(entry)
             n.saveLogEntry(entry)
             n.dmutex.Unlock()
-        } else {
-            result = gMSG_REPL_FAILED
+            result = gMSG_REPL_RESPONSE
         }
     }
     n.sendMsg(conn, result, "")
 }
 
-// 发送数据操作到其他节点,为保证数据的一致性，只要有另外1个节点返回成功后，我们就认为该数据请求成功，
-// 即使在处理过程中leader挂掉，只要有另外一个节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个节点作为leader
-// 这里的机制类似于主从备份的原理，当然由于这里采用了异步并发请求的机制，如果集群存在多个其他节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小
-func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
+// 发送数据操作到其他节点,为保证数据的一致性和可靠性，只要请求节点及另外1个server节点返回成功后，我们就认为该数据请求成功。
+// 1、保证请求节点的成功是为了让客户端在请求成功之后的下一次(本地请求)请求能优先获取到最新的修改；
+// 2、即使在处理过程中leader挂掉，只要有另外一个server节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个server节点作为leader,这里的机制类似于主从备份的原理；
+// 3、此外，由于采用了异步并发请求的机制，如果集群存在多个其他server节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小；
+func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
     // 只有一个leader节点，并且配置是允许单节点运行
     if n.Peers.Size() < 1 {
         if n.getRaftRole() == gROLE_RAFT_LEADER && n.getMinNode() == 1 {
@@ -175,9 +176,11 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
         }
     }
 
-    var scount     int32 = 0
-    var fcount     int32 = 0
-    var aliveCount int32 = 0
+    var clientok   int32 = 0 // 是否完成客户端请求成功
+    var serverok   int32 = 0 // 是否完成1个server请求成功
+    var failCount  int32 = 0 // 失败请求数
+    var doneCount  int32 = 0 // 成功请求数
+    var aliveCount int32 = 0 // 总共发送的请求 = 失败请求数 + 成功请求数
     result := false
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
@@ -185,32 +188,48 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry) bool {
             continue
         }
         aliveCount++
-        go func(info *NodeInfo, entry LogEntry) {
+        go func(info *NodeInfo, entry *LogEntry) {
             conn := n.getConn(info.Ip, gPORT_REPL)
             if conn == nil {
-                atomic.AddInt32(&fcount, 1)
+                atomic.AddInt32(&failCount, 1)
                 return
             }
             defer conn.Close()
-            if n.sendMsg(conn, entry.Act, gjson.Encode(entry)) == nil {
+            if n.sendMsg(conn, entry.Act, gjson.Encode(*entry)) == nil {
                 msg := n.receiveMsg(conn)
                 if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
-                    atomic.AddInt32(&scount, 1)
+                    if msg.Info.Id == clientId {
+                        atomic.AddInt32(&clientok, 1)
+                    }
+                    if msg.Info.Role == gROLE_SERVER {
+                        atomic.AddInt32(&serverok, 1)
+                    }
+                    atomic.AddInt32(&doneCount, 1)
                 } else {
-                    atomic.AddInt32(&fcount, 1)
+                    atomic.AddInt32(&failCount, 1)
                 }
             }
-        }(&info, entry)
+        }(&info, &entry)
     }
+    // 等待执行结束
     for aliveCount > 0 {
-        if atomic.LoadInt32(&scount) > 0 {
+        if atomic.LoadInt32(&clientok) > 0 && atomic.LoadInt32(&serverok) > 0 {
             result = true
             break;
         }
-        if atomic.LoadInt32(&fcount) == aliveCount {
+        if atomic.LoadInt32(&doneCount) == aliveCount {
+            result = true
             break;
         }
-        time.Sleep(200*time.Microsecond)
+        if atomic.LoadInt32(&failCount) == aliveCount {
+            result = false
+            break;
+        }
+        if atomic.LoadInt32(&failCount) > 0 && (atomic.LoadInt32(&failCount) + atomic.LoadInt32(&doneCount) == aliveCount) {
+            result = false
+            break;
+        }
+        time.Sleep(time.Millisecond)
     }
 
     return result
@@ -249,16 +268,13 @@ func (n *Node) saveLogEntry(entry LogEntry) {
         glog.Warning(fmt.Sprintf("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId))
         return
     }
-    n.LogList.PushFront(entry)
     switch entry.Act {
         case gMSG_REPL_DATA_SET:
-            //glog.Println("setting log entry", entry)
             for k, v := range entry.Items.(map[string]interface{}) {
                 n.DataMap.Set(k, v.(string))
             }
 
         case gMSG_REPL_DATA_REMOVE:
-            //glog.Println("removing log entry", entry)
             for _, v := range entry.Items.([]interface{}) {
                 n.DataMap.Remove(v.(string))
             }
@@ -292,7 +308,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
     }
     n.setStatusInReplication(true)
     defer n.setStatusInReplication(false)
-    // 支持分批同步，如果数据量大，每一次增量同步大小不超过10万条
+    // 支持分批同步，如果数据量大，每一次增量同步大小不超过1万条
     logid := msg.Info.LastLogId
     if n.getLastLogId() > msg.Info.LastLogId {
         if logid == 0 || (logid != 0 && n.isValidLogId(logid)) {

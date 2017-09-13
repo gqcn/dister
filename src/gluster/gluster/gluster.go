@@ -31,7 +31,7 @@ const (
     gVERSION                                = "0.8"   // 当前版本
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容
-    gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量
+    gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
     // 集群端口定义
     gPORT_RAFT                              = 4166    // 集群协议通信接口
     gPORT_REPL                              = 4167    // 集群数据同步接口
@@ -125,7 +125,7 @@ type Node struct {
     Score               int64                    // 选举比分
     ScoreCount          int                      // 选举比分的节点数
     ElectionDeadline    int64                    // 选举超时时间点
-    isInDataReplication bool                     // 是否正在数据同步过程中
+    isInDataReplication bool                     // 是否正在数据同步过程中(包括data和service)
 
     LogIdIndex          int64                    // 用于生成LogId的参考字段
     LastLogId           int64                    // 最后一次保存log的id，用以数据一致性判断
@@ -185,6 +185,7 @@ type MonitorWebUI struct {
 }
 
 // 节点信息
+// @todo 通信内容进行简化
 type NodeInfo struct {
     Group            string
     Id               string
@@ -198,8 +199,7 @@ type NodeInfo struct {
     LastLogId        int64
     LogCount         int
     LastServiceLogId int64
-    LastActiveTime   int64  // 上一次活跃的时间毫秒(活跃包含：新增、心跳)，该数据用于Peer数据表中
-    Version          string // 节点的版本
+    Version          string
 }
 
 // 日志记录项

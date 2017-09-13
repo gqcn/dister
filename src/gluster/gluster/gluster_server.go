@@ -325,7 +325,6 @@ func (n *Node) getNodeInfo() *NodeInfo {
         ScoreCount       : n.getScoreCount(),
         LastLogId        : n.getLastLogId(),
         LogCount         : n.getLogCount(),
-        LastActiveTime   : gtime.Millisecond(),
         LastServiceLogId : n.getLastServiceLogId(),
         Version          : gVERSION,
     }
@@ -415,10 +414,9 @@ func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
             if n.getScore() > info.Score {
                 result = true
             } else if n.getScore() == info.Score {
-                // 极少数情况, 这时采用随机策略
-                if grand.Rand(0, 1) == 0 {
-                    result = true
-                }
+                // 极少数情况, 这时避让策略
+                // 同样条件，最后请求的被选举为leader
+                result = true
             }
         }
     }
@@ -781,9 +779,6 @@ func (n *Node) updatePeerStatus(Id string, status int) {
     if r != nil {
         info       := r.(NodeInfo)
         info.Status = status
-        if info.LastActiveTime == 0 || status == gSTATUS_ALIVE {
-            info.LastActiveTime = gtime.Millisecond()
-        }
         n.updatePeerInfo(info)
     }
 }
