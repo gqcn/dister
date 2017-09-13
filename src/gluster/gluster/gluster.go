@@ -25,6 +25,7 @@ import (
     "g/encoding/gmd5"
     "g/encoding/gcompress"
     "g/os/gconsole"
+    "g/os/gcache"
 )
 
 const (
@@ -83,6 +84,8 @@ const (
     gMSG_REPL_DATA_REMOVE                   = 310
     gMSG_REPL_DATA_INCREMENTAL_UPDATE       = 320
     gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER     = 330
+    gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY     = 335
+    gMSG_REPL_DATA_APPEND_LOG_ENTRY         = 338
     gMSG_REPL_HEARTBEAT                     = 340
     gMSG_REPL_FAILED                        = 350
     gMSG_REPL_RESPONSE                      = 360
@@ -132,6 +135,7 @@ type Node struct {
     LogCount            int                      // 物理化保存的日志总数量，用于数据一致性判断
     LastServiceLogId    int64                    // 最后一次保存的service id号，用以识别service信息同步
     LogList             *glist.SafeList          // leader日志列表，用以数据同步
+    UncommittedLogs     *gcache.Cache            // uncommitted log entry缓存对象
     SavePath            string                   // 物理存储的本地数据*目录*绝对路径
     Service             *gmap.StringInterfaceMap // 存储的服务配置表
     ServiceForApi       *gmap.StringInterfaceMap // 用于提高Service API响应的冗余map变量，内容与Service成员变量相同，但结构不同
@@ -229,6 +233,7 @@ func NewServer() *Node {
         Peers               : gmap.NewStringInterfaceMap(),
         SavePath            : gfile.SelfDir(),
         LogList             : glist.NewSafeList(),
+        UncommittedLogs     : gcache.New(),
         Service             : gmap.NewStringInterfaceMap(),
         ServiceForApi       : gmap.NewStringInterfaceMap(),
         DataMap               : gmap.NewStringStringMap(),

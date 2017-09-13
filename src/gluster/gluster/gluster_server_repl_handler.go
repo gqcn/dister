@@ -12,6 +12,7 @@ import (
     "sync/atomic"
     "time"
     "fmt"
+    "strconv"
 )
 
 // 集群数据同步接口回调函数
@@ -29,6 +30,8 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
         case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
+        case gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY:   n.onMsgUncommittedLogEntry(conn, msg)
+        case gMSG_REPL_DATA_APPEND_LOG_ENTRY:       n.onMsgAppendLogEntry(conn, msg)
         case gMSG_REPL_DATA_INCREMENTAL_UPDATE:     n.onMsgReplUpdate(conn, msg)
         case gMSG_REPL_CONFIG_FROM_FOLLOWER     :   n.onMsgConfigFromFollower(conn, msg)
         case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:   n.onMsgServiceCompletelyUpdate(conn, msg)
@@ -37,6 +40,28 @@ func (n *Node) replTcpHandler(conn net.Conn) {
     }
     //这里不用自动关闭链接，由于链接有读取超时，当一段时间没有数据时会自动关闭
     n.replTcpHandler(conn)
+}
+
+// 确认写入日志
+func (n *Node) onMsgAppendLogEntry(conn net.Conn, msg *Msg) {
+    v := n.UncommittedLogs.Get(msg.Body)
+    if v != nil {
+        entry := v.(LogEntry)
+        n.LogList.PushFront(entry)
+        n.saveLogEntry(entry)
+    }
+    conn.Close()
+}
+
+// 新增数据日志
+func (n *Node) onMsgUncommittedLogEntry(conn net.Conn, msg *Msg) {
+    var entry LogEntry
+    result := gMSG_REPL_FAILED
+    if n.getLastLogId() == msg.Info.LastLogId && gjson.DecodeTo(msg.Body, &entry) == nil {
+        n.UncommittedLogs.Set(strconv.FormatInt(entry.Id, 10), entry, 10)
+        result = gMSG_REPL_RESPONSE
+    }
+    n.sendMsg(conn, result, "")
 }
 
 // Follower->Leader的配置同步
@@ -141,22 +166,14 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
             }
             // 先保存日志，当节点同步成功后才真实写入数据
             // 不用做重复性验证，即使失败了，客户端也需要做重试请求
-            n.LogList.PushFront(entry)
+            // 失败情况下日志只会不断追加，但并不会影响最终的数据结果
             if n.sendLogEntryToPeers(entry, msg.Info.Id) {
+                n.sendAppendEntryToPeers(entry.Id)
+                n.LogList.PushFront(entry)
                 n.saveLogEntry(entry)
                 result = gMSG_REPL_RESPONSE
             }
             n.dmutex.Unlock()
-        }
-    } else {
-        // follower需要使用缓存做等幂性处理，防止同一请求多次提交(特别是集群中部分节点失败的情况)
-        var entry LogEntry
-        if n.getLastLogId() == msg.Info.LastLogId && gjson.DecodeTo(msg.Body, &entry) == nil {
-            n.dmutex.Lock()
-            n.LogList.PushFront(entry)
-            n.saveLogEntry(entry)
-            n.dmutex.Unlock()
-            result = gMSG_REPL_RESPONSE
         }
     }
     n.sendMsg(conn, result, "")
@@ -176,7 +193,6 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
         }
     }
 
-    var clientok   int32 = 0 // 是否完成客户端请求成功
     var serverok   int32 = 0 // 是否完成1个server请求成功
     var failCount  int32 = 0 // 失败请求数
     var doneCount  int32 = 0 // 成功请求数
@@ -195,12 +211,9 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
                 return
             }
             defer conn.Close()
-            if n.sendMsg(conn, entry.Act, gjson.Encode(*entry)) == nil {
+            if n.sendMsg(conn, gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY, gjson.Encode(*entry)) == nil {
                 msg := n.receiveMsg(conn)
                 if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
-                    if msg.Info.Id == clientId {
-                        atomic.AddInt32(&clientok, 1)
-                    }
                     if msg.Info.Role == gROLE_SERVER {
                         atomic.AddInt32(&serverok, 1)
                     }
@@ -213,7 +226,7 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
     }
     // 等待执行结束
     for aliveCount > 0 {
-        if atomic.LoadInt32(&clientok) > 0 && atomic.LoadInt32(&serverok) > 0 {
+        if atomic.LoadInt32(&serverok) > 0 {
             result = true
             break;
         }
@@ -233,6 +246,23 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
     }
 
     return result
+}
+
+// 向集群节点确认数据提交AppendEntries
+func (n *Node) sendAppendEntryToPeers(logid int64) {
+    for _, v := range n.Peers.Values() {
+        info := v.(NodeInfo)
+        if info.Status != gSTATUS_ALIVE {
+            continue
+        }
+        go func(info *NodeInfo, id string) {
+            conn := n.getConn(info.Ip, gPORT_REPL)
+            if conn != nil {
+                n.sendMsg(conn, gMSG_REPL_DATA_APPEND_LOG_ENTRY, id)
+                conn.Close()
+            }
+        }(&info, strconv.FormatInt(logid, 10))
+    }
 }
 
 // 心跳响应，用于数据的同步，包括：Peers、DataMap、Service
