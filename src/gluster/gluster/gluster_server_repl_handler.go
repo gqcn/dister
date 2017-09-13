@@ -44,6 +44,9 @@ func (n *Node) replTcpHandler(conn net.Conn) {
 
 // 确认写入日志
 func (n *Node) onMsgAppendLogEntry(conn net.Conn, msg *Msg) {
+    n.setStatusInReplication(true)
+    defer n.setStatusInReplication(false)
+
     v := n.UncommittedLogs.Get(msg.Body)
     if v != nil {
         entry := v.(LogEntry)
@@ -171,6 +174,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
                 n.sendAppendEntryToPeers(entry.Id)
                 n.LogList.PushFront(entry)
                 n.saveLogEntry(entry)
+
                 result = gMSG_REPL_RESPONSE
             }
             n.dmutex.Unlock()
@@ -269,8 +273,8 @@ func (n *Node) sendAppendEntryToPeers(logid int64) {
 // 只允许leader->follower的数据同步
 func (n *Node) onMsgReplHeartbeat(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_HEARTBEAT
-    // 如果当前节点正处于数据同步中，那么本次心跳不再执行同步判断
-    if !n.getStatusInReplication() {
+    // 如果当前节点正处于数据同步中，或者未提交日志不为空(表明有数据待写入)，那么本次心跳不再执行同步判断
+    if !n.getStatusInReplication() && n.UncommittedLogs.Size() == 0 {
         if n.getLastLogId() < msg.Info.LastLogId {
             // 数据同步检测
             result = gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER

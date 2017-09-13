@@ -53,7 +53,7 @@ func (n *Node) dataReplicationLoop() {
                             // 如果当前节点正处于数据同步中，那么本次心跳不再执行任何的数据同步判断
                             if !n.getStatusInReplication() {
                                 switch msg.Head {
-                                    case gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER:         n.updateDataToRemoteNode(conn, msg)
+                                    case gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER:    n.updateDataToRemoteNode(conn, msg)
                                     case gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER: n.updateServiceToRemoteNode(conn, msg)
                                 }
                             }
