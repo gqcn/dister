@@ -11,6 +11,7 @@ import (
     "strconv"
     "g/os/gcache"
     "os/exec"
+    "os/user"
 )
 
 // 将Service转为可json化的数据结构
@@ -87,7 +88,8 @@ func (n *Node) checkServiceHealth(service *Service) {
             switch strings.ToLower(service.Type) {
                 case "mysql":  fallthrough
                 case "pgsql":  n.dbHealthCheck(service.Type, m)
-                case "web":    n.webHealthCheck(m)
+                case "web":    n.tcpHealthCheck(m)
+                case "tcp":    n.webHealthCheck(m)
                 case "custom": n.customHealthCheck(m)
             }
             nstatus := m.Get("status")
@@ -112,6 +114,27 @@ func (n *Node) checkServiceHealth(service *Service) {
         n.ServiceForApi.Set(service.Name, *n.serviceToServiceStruct(service))
         n.setLastServiceLogId(gtime.Microsecond())
         n.setServiceDirty(true)
+    }
+}
+
+// TCP链接健康检查
+func (n *Node) tcpHealthCheck(item *gmap.StringInterfaceMap) {
+    host := item.Get("host")
+    port := item.Get("port")
+    if host == nil || port == nil {
+        return
+    }
+    p, err := strconv.Atoi(port.(string))
+    if err != nil {
+        item.Set("status", 0)
+    } else {
+        conn := n.getConn(host.(string), p)
+        if conn != nil {
+            item.Set("status", 1)
+            conn.Close()
+        } else {
+            item.Set("status", 0)
+        }
     }
 }
 

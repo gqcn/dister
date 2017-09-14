@@ -8,21 +8,21 @@
         }
     },
     {
-        "name" : "db2",
-        "type" : "mysql",
+        "name" : "memcache",
+        "type" : "tcp",
         "node" : {
-            "node1": {"host":"192.168.2.15", "port": "3306", "user":"root", "pass":"123456", "database":"test2", "priority": "100", "interval" : "2000"},
-            "node2": {"host":"192.168.2.15", "port": "3306", "user":"root", "pass":"123456", "database":"test3", "priority": "100", "interval" : "2000"}
+            "node1": {"host":"192.168.2.15", "port": "11211", "priority": "100", "interval" : "2000"},
+            "node2": {"host":"192.168.2.18", "port": "11211", "priority": "100", "interval" : "2000"}
         }
     },
     {
         "name" : "homesite",
         "type" : "web",
         "node" : {
-            "node1": {"host":"192.168.2.15", "port": "80",   "url": "http://192.168.2.15:80/health.php",   "interval" : "5000", "priority": "100"},
-            "node2": {"host":"192.168.2.15", "port": "8080", "url": "http://192.168.2.15:8080/health.php", "interval" : "5000", "priority": "100"},
-            "node3": {"host":"192.168.2.15", "port": "8088", "url": "http://192.168.2.15:8088/health.php", "interval" : "5000", "priority": "100"},
-            "node4": {"host":"192.168.2.15", "port": "8888", "url": "http://192.168.2.15:8888/health.php", "interval" : "5000", "priority": "100"}
+            "node1": {"url": "http://192.168.2.15:80/health.php",   "interval" : "5000", "priority": "100"},
+            "node2": {"url": "http://192.168.2.15:8080/health.php", "interval" : "5000", "priority": "100"},
+            "node3": {"url": "http://192.168.2.15:8088/health.php", "interval" : "5000", "priority": "100"},
+            "node4": {"url": "http://192.168.2.15:8888/health.php", "interval" : "5000", "priority": "100"}
         }
     },
     {
