@@ -16,19 +16,15 @@ import (
 // 日志自动保存处理
 func (n *Node) autoSavingHandler() {
     for {
-        go n.saveLogList()
-        go n.savePeersToFile()
+        n.saveLogList()
+        n.savePeersToFile()
         if n.getDataDirty() {
-            go func() {
-                n.saveDataToFile()
-                n.setDataDirty(false)
-            }()
+            n.saveDataToFile()
+            n.setDataDirty(false)
         }
         if n.getServiceDirty() {
-            go func() {
-                n.saveServiceToFile()
-                n.setServiceDirty(false)
-            }()
+            n.saveServiceToFile()
+            n.setServiceDirty(false)
         }
         time.Sleep(gLOG_REPL_AUTOSAVE_INTERVAL * time.Millisecond)
     }
@@ -47,10 +43,10 @@ func (n *Node) saveLogList() {
     //n.LogList.RLock()
     p := n.LogList.Back()
     for p != nil {
-        entry := p.Value.(LogEntry)
+        entry := p.Value.(*LogEntry)
         if entry.Id <= minLogId {
             t      := p.Prev()
-            s, err := json.Marshal(entry)
+            s, err := json.Marshal(*entry)
             if err != nil {
                 glog.Error("json marshal log entry error:", err)
                 break;
@@ -90,7 +86,6 @@ func (n *Node) saveDataToFile() {
     data := make(map[string]interface{})
     data  = map[string]interface{} {
         "LastLogId" : n.getLastLogId(),
-        "LogCount"  : n.getLogCount(),
         "DataMap"   : *n.DataMap.Clone(),
     }
     content := []byte(gjson.Encode(&data))
@@ -152,7 +147,7 @@ func (n *Node) restorePeers() {
             bin = gcompress.UnZlib(bin)
         }
         if bin != nil && len(bin) > 0 {
-            glog.Println("restore peers from", path)
+            //glog.Println("restore peers from", path)
             m := make(map[string]NodeInfo)
             if err := gjson.DecodeTo(string(bin), &m); err == nil {
                 myid := n.getId()
@@ -177,11 +172,10 @@ func (n *Node) restoreDataMap() {
             bin = gcompress.UnZlib(bin)
         }
         if bin != nil && len(bin) > 0 {
-            glog.Println("restore data from", path)
+            //glog.Println("restore data from", path)
             m := make(map[string]string)
             j := gjson.DecodeToJson(string(bin))
             n.setLastLogId(j.GetInt64("LastLogId"))
-            n.setLogCount(j.GetInt("LogCount"))
             if err := j.GetToVar("DataMap", &m); err == nil {
                 n.DataMap.BatchSet(m)
             } else {
@@ -200,7 +194,7 @@ func (n *Node) restoreService() {
             bin = gcompress.UnZlib(bin)
         }
         if bin != nil && len(bin) > 0 {
-            glog.Println("restore service from", path)
+            //glog.Println("restore service from", path)
             m := make(map[string]ServiceStruct)
             j := gjson.DecodeToJson(string(bin))
             n.setLastServiceLogId(j.GetInt64("LastServiceLogId"))
@@ -214,25 +208,5 @@ func (n *Node) restoreService() {
         }
     }
 }
-
-// 使用logentry数组更新本地的日志列表
-func (n *Node) updateFromLogEntriesJson(jsonContent string) error {
-    array := make([]LogEntry, 0)
-    err   := gjson.DecodeTo(jsonContent, &array)
-    if err != nil {
-        glog.Error(err)
-        return err
-    }
-    if array != nil && len(array) > 0 {
-        for _, v := range array {
-            if v.Id > n.getLastLogId() {
-                n.LogList.PushFront(v)
-                n.saveLogEntry(v)
-            }
-        }
-    }
-    return nil
-}
-
 
 

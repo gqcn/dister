@@ -6,7 +6,6 @@ package gluster
 import (
     "g/encoding/gjson"
     "time"
-    "g/core/types/gset"
     "g/os/gfile"
     "os"
     "bufio"
@@ -15,55 +14,62 @@ import (
 
 // leader到其他节点的数据同步监听
 func (n *Node) replicationHandler() {
-    // 初始化数据同步心跳检测
+    // 数据同步检测
     go n.dataReplicationLoop()
 
-    // Peers自动同步
+    // Service同步检测
+    go n.serviceReplicationLoop()
+
+    // Peers同步检测
     go n.peersReplicationLoop()
 }
 
-// 日志自动同步检查，类似心跳
+// 日志自动同步检查
 func (n *Node) dataReplicationLoop() {
-    conns := gset.NewStringSet()
     for {
         if n.getRaftRole() == gROLE_RAFT_LEADER {
             for _, v := range n.Peers.Values() {
                 info := v.(NodeInfo)
-                if conns.Contains(info.Id) {
+                if info.Status != gSTATUS_ALIVE {
                     continue
                 }
-                go func(info *NodeInfo) {
-                    conns.Add(info.Id)
-                    defer conns.Remove(info.Id)
-                    conn := n.getConn(info.Ip, gPORT_REPL)
-                    if conn == nil {
-                        return
-                    }
-                    defer conn.Close()
-                    for {
-                        if n.getRaftRole() != gROLE_RAFT_LEADER || !n.Peers.Contains(info.Id){
-                            return
-                        }
-                        //glog.Println("sending replication heartbeat to", ip)
-                        if n.sendMsg(conn, gMSG_REPL_HEARTBEAT, "") != nil {
-                            return
-                        }
-                        msg := n.receiveMsg(conn)
-                        if msg != nil {
-                            // 如果当前节点正处于数据同步中，那么本次心跳不再执行任何的数据同步判断
-                            if !n.getStatusInReplication() {
-                                switch msg.Head {
-                                    case gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER:    n.updateDataToRemoteNode(conn, msg)
-                                    case gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER: n.updateServiceToRemoteNode(conn, msg)
-                                }
+                go func(ip string) {
+                    conn := n.getConn(ip, gPORT_REPL)
+                    if conn != nil {
+                        defer conn.Close()
+                        if n.sendMsg(conn, gMSG_REPL_DATA_UPDATE_CHECK, "") != nil {
+                            msg := n.receiveMsg(conn)
+                            if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
+                                n.updateDataToRemoteNode(conn, &msg.Info)
                             }
-                            time.Sleep(gLOG_REPL_TIMEOUT_HEARTBEAT * time.Millisecond)
                         }
                     }
-                }(&info)
+                }(info.Ip)
             }
         }
-        time.Sleep(100 * time.Millisecond)
+        time.Sleep(gLOG_REPL_DATA_UPDATE_INTERVAL * time.Millisecond)
+    }
+}
+
+// Service自动同步检测
+func (n *Node) serviceReplicationLoop() {
+    for {
+        if n.getRaftRole() == gROLE_RAFT_LEADER {
+            for _, v := range n.Peers.Values() {
+                info := v.(NodeInfo)
+                if info.Status != gSTATUS_ALIVE || n.getLastServiceLogId() <= info.LastServiceLogId {
+                    continue
+                }
+                go func(ip string) {
+                    conn := n.getConn(ip, gPORT_REPL)
+                    if conn != nil {
+                        defer conn.Close()
+                        n.updateServiceToRemoteNode(conn)
+                    }
+                }(info.Ip)
+            }
+        }
+        time.Sleep(gLOG_REPL_SERVICE_UPDATE_INTERVAL * time.Millisecond)
     }
 }
 
@@ -73,6 +79,9 @@ func (n *Node) peersReplicationLoop() {
         if n.getRaftRole() == gROLE_RAFT_LEADER {
             for _, v := range n.Peers.Values() {
                 info := v.(NodeInfo)
+                if info.Status != gSTATUS_ALIVE {
+                    continue
+                }
                 go func(info *NodeInfo) {
                     conn := n.getConn(info.Ip, gPORT_REPL)
                     if conn != nil {
@@ -121,12 +130,12 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
                 if len(array) == max {
                     break;
                 }
-                r := l.Value.(LogEntry)
+                r := l.Value.(*LogEntry)
                 if r.Id > id {
                     match = true
                 } else if r.Id > id {
                     if match {
-                        array = append(array, r)
+                        array = append(array, *r)
                     } else {
                         break;
                     }
@@ -207,7 +216,7 @@ func (n *Node) isValidLogId(id int64) bool {
         //n.LogList.RLock()
         l := n.LogList.Back()
         for l != nil {
-            r := l.Value.(LogEntry)
+            r := l.Value.(*LogEntry)
             if r.Id == id {
                 return true
             } else if r.Id < id {

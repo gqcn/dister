@@ -22,7 +22,7 @@ func (n *Node) electionHandler() {
                     n.beginScore()
                 } else {
                     // 集群目前仅有1个节点
-                    glog.Println("only one node in this cluster, i'll be the leader")
+                    //glog.Println("only one node in this cluster, i'll be the leader")
                     n.setLeader(n.getNodeInfo())
                     n.setRaftRole(gROLE_RAFT_LEADER)
                 }

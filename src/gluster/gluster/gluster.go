@@ -60,9 +60,10 @@ const (
     gTCP_WRITE_TIMEOUT                      = 3000    // (毫秒)TCP链接写入超时
     gELECTION_TIMEOUT                       = 1000    // (毫秒)RAFT选举超时时间
     gELECTION_TIMEOUT_HEARTBEAT             = 500     // (毫秒)RAFT Leader统治维持心跳间隔
-    gLOG_REPL_TIMEOUT_HEARTBEAT             = 1000    // (毫秒)数据同步检测心跳间隔(数据包括kv数据及service数据)
+    gLOG_REPL_DATA_UPDATE_INTERVAL          = 1000    // (毫秒)数据同步检测心跳间隔
+    gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 1000    // (毫秒)Service同步检测心跳间隔
     gLOG_REPL_AUTOSAVE_INTERVAL             = 2000    // (毫秒)数据自动物理化保存的间隔
-    gLOG_REPL_PEERS_INTERVAL                = 3000    // (毫秒)Peers节点信息同步(非完整同步)
+    gLOG_REPL_PEERS_INTERVAL                = 2000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL          = 2000    // (毫秒)健康检查默认间隔
 
     // RAFT操作
@@ -82,17 +83,15 @@ const (
     // 数据同步操作
     gMSG_REPL_DATA_SET                      = 300
     gMSG_REPL_DATA_REMOVE                   = 310
+    gMSG_REPL_DATA_UPDATE_CHECK             = 315
     gMSG_REPL_DATA_INCREMENTAL_UPDATE       = 320
-    gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER     = 330
     gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY     = 335
     gMSG_REPL_DATA_APPEND_LOG_ENTRY         = 338
-    gMSG_REPL_HEARTBEAT                     = 340
     gMSG_REPL_FAILED                        = 350
     gMSG_REPL_RESPONSE                      = 360
     gMSG_REPL_PEERS_UPDATE                  = 370
     gMSG_REPL_CONFIG_FROM_FOLLOWER          = 380
     gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 390
-    gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER  = 400
 
     // API相关
     gMSG_API_PEERS_ADD                      = 500
@@ -128,20 +127,19 @@ type Node struct {
     Score               int64                    // 选举比分
     ScoreCount          int                      // 选举比分的节点数
     ElectionDeadline    int64                    // 选举超时时间点
-    isInDataReplication bool                     // 是否正在数据同步过程中(包括data和service)
 
-    LogIdIndex          int64                    // 用于生成LogId的参考字段
-    LastLogId           int64                    // 最后一次保存log的id，用以数据一致性判断
-    LogCount            int                      // 物理化保存的日志总数量，用于数据一致性判断
-    LastServiceLogId    int64                    // 最后一次保存的service id号，用以识别service信息同步
-    LogList             *glist.SafeList          // leader日志列表，用以数据同步
-    UncommittedLogs     *gcache.Cache            // uncommitted log entry缓存对象
-    SavePath            string                   // 物理存储的本地数据*目录*绝对路径
-    Service             *gmap.StringInterfaceMap // 存储的服务配置表
-    ServiceForApi       *gmap.StringInterfaceMap // 用于提高Service API响应的冗余map变量，内容与Service成员变量相同，但结构不同
-    DataMap             *gmap.StringStringMap    // 存储的K-V哈希表
-    IsDataDirty          bool                    // 数据库是否已经有修改，用于判断是否需要物理化
-    IsServiceDirty       bool                    // Service是否已经有修改，用于判断是否需要物理化
+    LogIdIndex           int64                    // 用于生成LogId的参考字段
+    LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
+    LastServiceLogId     int64                    // 最后一次保存的service id号，用以识别service信息同步
+    LogList              *glist.SafeList          // leader日志列表，用以数据同步
+    UncommittedLogs      *gcache.Cache            // uncommitted log entry缓存对象
+    SavePath             string                   // 物理存储的本地数据*目录*绝对路径
+    Service              *gmap.StringInterfaceMap // 存储的服务配置表
+    ServiceForApi        *gmap.StringInterfaceMap // 用于提高Service API响应的冗余map变量，内容与Service成员变量相同，但结构不同
+    DataMap              *gmap.StringStringMap    // 存储的K-V哈希表
+
+    IsDataDirty           bool                    // 数据库是否已经有修改，用于判断是否需要物理化
+    IsServiceDirty        bool                    // Service是否已经有修改，用于判断是否需要物理化
 }
 
 // 服务对象
@@ -191,19 +189,18 @@ type MonitorWebUI struct {
 // 节点信息
 // @todo 通信内容进行简化
 type NodeInfo struct {
-    Group            string
-    Id               string
-    Name             string
-    Ip               string
-    Status           int
-    Role             int
-    RaftRole         int
-    Score            int64
-    ScoreCount       int
-    LastLogId        int64
-    LogCount         int
-    LastServiceLogId int64
-    Version          string
+    Group            string `json:"group"`
+    Id               string `json:"id"`
+    Name             string `json:"name"`
+    Ip               string `json:"ip"`
+    Status           int    `json:"status"`
+    Role             int    `json:"role"`
+    RaftRole         int    `json:"rrole"`
+    Score            int64  `json:"score"`
+    ScoreCount       int    `json:"scount"`
+    LastLogId        int64  `json:"logid"`
+    LastServiceLogId int64  `json:"slogid"`
+    Version          string `json:"version"`
 }
 
 // 日志记录项
@@ -236,8 +233,7 @@ func NewServer() *Node {
         UncommittedLogs     : gcache.New(),
         Service             : gmap.NewStringInterfaceMap(),
         ServiceForApi       : gmap.NewStringInterfaceMap(),
-        DataMap               : gmap.NewStringStringMap(),
-        isInDataReplication : false,
+        DataMap             : gmap.NewStringStringMap(),
     }
     ips, err := gip.IntranetIP()
     if err == nil && len(ips) == 1 {

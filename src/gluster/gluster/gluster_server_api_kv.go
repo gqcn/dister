@@ -44,8 +44,8 @@ func (this *NodeApiKv) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     if err != nil {
         w.ResponseJson(0, err.Error(), nil)
     } else {
-        // 为保证客户端能够及时相应（例如在写入请求的下一次获取请求将一定能够获取到最新的数据），
-        // 因此，请求端应当在leader返回成功后，同时将该数据写入到本地
+        // 为保证客户端能够及时响应（例如在写入请求的下一次获取请求将一定能够获取到最新的数据），
+        // 因此，请求端应当在leader返回成功后，同时将该数据写入到本地，这是保证整体集群效率的一个做法
         if this.node.Id != this.node.getLeader().Id {
             this.node.DataMap.BatchSet(items)
         }
@@ -65,6 +65,7 @@ func (this *NodeApiKv) Delete(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     if err != nil {
         w.ResponseJson(0, err.Error(), nil)
     } else {
+        // 保证客户端及时响应
         if this.node.Id != this.node.getLeader().Id {
             this.node.DataMap.BatchRemove(list)
         }

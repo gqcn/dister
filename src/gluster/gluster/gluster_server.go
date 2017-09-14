@@ -324,7 +324,6 @@ func (n *Node) getNodeInfo() *NodeInfo {
         Score            : n.getScore(),
         ScoreCount       : n.getScoreCount(),
         LastLogId        : n.getLastLogId(),
-        LogCount         : n.getLogCount(),
         LastServiceLogId : n.getLastServiceLogId(),
         Version          : gVERSION,
     }
@@ -405,9 +404,9 @@ func (n *Node) sayHiToLocalLan() {
 // 需要同时对比日志信息及选举比分
 func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
     result := false
-    if n.getLogCount() > info.LogCount && n.getLastLogId() > info.LastLogId {
+    if n.getLastLogId() > info.LastLogId {
         result = true
-    } else if n.getLogCount() == info.LogCount && n.getLastLogId() == info.LastLogId {
+    } else if n.getLastLogId() == info.LastLogId {
         if n.getScoreCount() > info.ScoreCount {
             result = true
         } else if n.getScoreCount() == info.ScoreCount {
@@ -525,24 +524,10 @@ func (n *Node) getMinNode() int {
     return r
 }
 
-func (n *Node) getLogCount() int {
-    n.mutex.RLock()
-    r := n.LogCount
-    n.mutex.RUnlock()
-    return r
-}
-
 func (n *Node) getLastServiceLogId() int64 {
     n.mutex.Lock()
     r := n.LastServiceLogId
     n.mutex.Unlock()
-    return r
-}
-
-func (n *Node) getStatusInReplication() bool {
-    n.mutex.RLock()
-    r := n.isInDataReplication
-    n.mutex.RUnlock()
     return r
 }
 
@@ -577,9 +562,6 @@ func (n *Node) getServiceFilePath() string {
 // 根据logid计算数据存储的文件绝对路径，每个数据日志文件最大存储10万条记录
 func (n *Node) getLogEntryFileSavePathById(id int64) string {
     r := int(id/10000/gLOGENTRY_FILE_SIZE)
-    if r == 0 {
-        r = 1
-    }
     n.mutex.RLock()
     path := n.SavePath + gfile.Separator + fmt.Sprintf("gluster.entry.%d.db", r)
     n.mutex.RUnlock()
@@ -611,13 +593,6 @@ func (n *Node) addScore(s int64) {
 func (n *Node) addScoreCount() {
     n.mutex.Lock()
     n.ScoreCount++
-    n.mutex.Unlock()
-}
-
-// 添加日志总数
-func (n *Node) addLogCount() {
-    n.mutex.Lock()
-    n.LogCount++
     n.mutex.Unlock()
 }
 
@@ -709,21 +684,9 @@ func (n *Node) setLastLogId(id int64) {
     n.mutex.Unlock()
 }
 
-func (n *Node) setLogCount(count int) {
-    n.mutex.Lock()
-    n.LogCount = count
-    n.mutex.Unlock()
-}
-
 func (n *Node) setLastServiceLogId(id int64) {
     n.mutex.Lock()
     n.LastServiceLogId = id
-    n.mutex.Unlock()
-}
-
-func (n *Node) setStatusInReplication(status bool ) {
-    n.mutex.Lock()
-    n.isInDataReplication = status
     n.mutex.Unlock()
 }
 

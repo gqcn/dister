@@ -26,10 +26,10 @@ func (n *Node) replTcpHandler(conn net.Conn) {
     switch msg.Head {
         case gMSG_REPL_DATA_SET:                    n.onMsgReplDataSet(conn, msg)
         case gMSG_REPL_DATA_REMOVE:                 n.onMsgReplDataRemove(conn, msg)
-        case gMSG_REPL_HEARTBEAT:                   n.onMsgReplHeartbeat(conn, msg)
         case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
         case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
+        case gMSG_REPL_DATA_UPDATE_CHECK:           n.onMsgDataUpdateCheck(conn, msg)
         case gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY:   n.onMsgUncommittedLogEntry(conn, msg)
         case gMSG_REPL_DATA_APPEND_LOG_ENTRY:       n.onMsgAppendLogEntry(conn, msg)
         case gMSG_REPL_DATA_INCREMENTAL_UPDATE:     n.onMsgReplUpdate(conn, msg)
@@ -42,18 +42,46 @@ func (n *Node) replTcpHandler(conn net.Conn) {
     n.replTcpHandler(conn)
 }
 
+// kv设置，最终一致性
+// 这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
+func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
+    result := gMSG_REPL_FAILED
+    if n.getRaftRole() == gROLE_RAFT_LEADER {
+        var items interface{}
+        if gjson.DecodeTo(msg.Body, &items) == nil {
+            n.dmutex.Lock()
+            var entry = LogEntry {
+                Id    : n.makeLogId(),
+                Act   : msg.Head,
+                Items : items,
+            }
+            // 先保存日志，当节点同步成功后才真实写入数据
+            // 不用做重复性验证，即使失败了，客户端也需要做重试请求
+            // 失败情况下日志只会不断追加，但并不会影响最终的数据结果
+            if n.sendUncommittedLogEntryToPeers(entry, msg.Info.Id) {
+                go n.sendAppendLogEntryToPeers(entry.Id)
+                n.LogList.PushFront(&entry)
+                n.saveLogEntry(&entry)
+                result = gMSG_REPL_RESPONSE
+            }
+            n.dmutex.Unlock()
+        }
+    }
+    n.sendMsg(conn, result, "")
+}
+
 // 确认写入日志
 func (n *Node) onMsgAppendLogEntry(conn net.Conn, msg *Msg) {
-    n.setStatusInReplication(true)
-    defer n.setStatusInReplication(false)
-
     v := n.UncommittedLogs.Get(msg.Body)
     if v != nil {
         entry := v.(LogEntry)
-        n.LogList.PushFront(entry)
-        n.saveLogEntry(entry)
+        n.dmutex.Lock()
+        n.LogList.PushFront(&entry)
+        n.saveLogEntry(&entry)
+        n.dmutex.Unlock()
+        n.UncommittedLogs.Remove(msg.Body)
     }
-    conn.Close()
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
 
 // 新增数据日志
@@ -77,7 +105,7 @@ func (n *Node) onMsgConfigFromFollower(conn net.Conn, msg *Msg) {
         if peers != nil {
             for _, v := range peers {
                 ip := v.(string)
-                if ip == n.Ip || n.Peers.Contains(ip){
+                if ip == n.Ip || n.Peers.Contains(ip) {
                     continue
                 }
                 go func(ip string) {
@@ -151,34 +179,11 @@ func (n *Node) onMsgReplDataRemove(conn net.Conn, msg *Msg) {
     n.onMsgReplDataSet(conn, msg)
 }
 
-// kv设置，最终一致性
-// 这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
-func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
-    n.setStatusInReplication(true)
-    defer n.setStatusInReplication(false)
-
+// Data是否需要同步检测
+func (n *Node) onMsgDataUpdateCheck(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_FAILED
-    if n.getRaftRole() == gROLE_RAFT_LEADER {
-        var items interface{}
-        if gjson.DecodeTo(msg.Body, &items) == nil {
-            n.dmutex.Lock()
-            var entry = LogEntry {
-                Id    : n.makeLogId(),
-                Act   : msg.Head,
-                Items : items,
-            }
-            // 先保存日志，当节点同步成功后才真实写入数据
-            // 不用做重复性验证，即使失败了，客户端也需要做重试请求
-            // 失败情况下日志只会不断追加，但并不会影响最终的数据结果
-            if n.sendLogEntryToPeers(entry, msg.Info.Id) {
-                n.sendAppendEntryToPeers(entry.Id)
-                n.LogList.PushFront(entry)
-                n.saveLogEntry(entry)
-
-                result = gMSG_REPL_RESPONSE
-            }
-            n.dmutex.Unlock()
-        }
+    if n.getLastLogId() < msg.Info.LastLogId && n.UncommittedLogs.Size() == 0 {
+        result = gMSG_REPL_RESPONSE
     }
     n.sendMsg(conn, result, "")
 }
@@ -187,7 +192,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
 // 1、保证请求节点的成功是为了让客户端在请求成功之后的下一次(本地请求)请求能优先获取到最新的修改；
 // 2、即使在处理过程中leader挂掉，只要有另外一个server节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个server节点作为leader,这里的机制类似于主从备份的原理；
 // 3、此外，由于采用了异步并发请求的机制，如果集群存在多个其他server节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小；
-func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
+func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) bool {
     // 只有一个leader节点，并且配置是允许单节点运行
     if n.Peers.Size() < 1 {
         if n.getRaftRole() == gROLE_RAFT_LEADER && n.getMinNode() == 1 {
@@ -197,10 +202,15 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
         }
     }
 
+    var clientok   int32 = 0 // 是否完成请求节点请求成功
     var serverok   int32 = 0 // 是否完成1个server请求成功
     var failCount  int32 = 0 // 失败请求数
     var doneCount  int32 = 0 // 成功请求数
     var aliveCount int32 = 0 // 总共发送的请求 = 失败请求数 + 成功请求数
+    // 如果本地就是leader
+    if clientId == n.getId() {
+        clientok = 1
+    }
     result := false
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
@@ -218,6 +228,9 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
             if n.sendMsg(conn, gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY, gjson.Encode(*entry)) == nil {
                 msg := n.receiveMsg(conn)
                 if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
+                    if msg.Info.Id == clientId {
+                        atomic.AddInt32(&clientok, 1)
+                    }
                     if msg.Info.Role == gROLE_SERVER {
                         atomic.AddInt32(&serverok, 1)
                     }
@@ -229,8 +242,9 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
         }(&info, &entry)
     }
     // 等待执行结束
+    timeout := gtime.Second() + 3
     for aliveCount > 0 {
-        if atomic.LoadInt32(&serverok) > 0 {
+        if atomic.LoadInt32(&clientok) > 0 && atomic.LoadInt32(&serverok) > 0 {
             result = true
             break;
         }
@@ -239,11 +253,12 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
             break;
         }
         if atomic.LoadInt32(&failCount) == aliveCount {
-            result = false
             break;
         }
         if atomic.LoadInt32(&failCount) > 0 && (atomic.LoadInt32(&failCount) + atomic.LoadInt32(&doneCount) == aliveCount) {
-            result = false
+            break;
+        }
+        if gtime.Second() >= timeout {
             break;
         }
         time.Sleep(time.Millisecond)
@@ -253,39 +268,60 @@ func (n *Node) sendLogEntryToPeers(entry LogEntry, clientId string) bool {
 }
 
 // 向集群节点确认数据提交AppendEntries
-func (n *Node) sendAppendEntryToPeers(logid int64) {
+func (n *Node) sendAppendLogEntryToPeers(logid int64) {
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {
             continue
         }
-        go func(info *NodeInfo, id string) {
-            conn := n.getConn(info.Ip, gPORT_REPL)
-            if conn != nil {
-                n.sendMsg(conn, gMSG_REPL_DATA_APPEND_LOG_ENTRY, id)
-                conn.Close()
+        go func(ip string) {
+            try := 0
+            for {
+                if n.sendAppendLogEntryToPeer(ip, logid) {
+                    break;
+                } else {
+                    try++
+                    if try == 3 {
+                        break
+                    }
+                }
             }
-        }(&info, strconv.FormatInt(logid, 10))
+        }(info.Ip)
     }
 }
 
-// 心跳响应，用于数据的同步，包括：Peers、DataMap、Service
-// 只允许leader->follower的数据同步
-func (n *Node) onMsgReplHeartbeat(conn net.Conn, msg *Msg) {
-    result := gMSG_REPL_HEARTBEAT
-    // 如果当前节点正处于数据同步中，或者未提交日志不为空(表明有数据待写入)，那么本次心跳不再执行同步判断
-    if !n.getStatusInReplication() && n.UncommittedLogs.Size() == 0 {
-        if n.getLastLogId() < msg.Info.LastLogId {
-            // 数据同步检测
-            result = gMSG_REPL_DATA_NEED_UPDATE_FOLLOWER
-        } else if n.getLastServiceLogId() < msg.Info.LastServiceLogId {
-            // Service同步检测
-            result = gMSG_REPL_SERVICE_NEED_UPDATE_FOLLOWER
+// 向节点发送AppendEntry请求
+func (n *Node) sendAppendLogEntryToPeer(ip string, logid int64) bool {
+    result  := false
+    tryConn := 0
+    for !result {
+        conn := n.getConn(ip, gPORT_REPL)
+        if conn != nil {
+            tryMsg := 0
+            for !result {
+                if n.sendMsg(conn, gMSG_REPL_DATA_APPEND_LOG_ENTRY, strconv.FormatInt(logid, 10)) != nil {
+                    msg := n.receiveMsg(conn)
+                    if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
+                        result = true
+                        break;
+                    }
+                }
+                tryMsg++
+                if tryMsg == 3 {
+                    break;
+                }
+            }
+            if tryMsg == 3 {
+                break;
+            }
+        } else {
+            tryConn++
+            if tryConn == 3 {
+                break;
+            }
         }
-    } else {
-        //glog.Println("status in replication, quit replication check")
     }
-    n.sendMsg(conn, result, "")
+    return false
 }
 
 // 数据同步，更新本地数据
@@ -296,7 +332,7 @@ func (n *Node) onMsgReplUpdate(conn net.Conn, msg *Msg) {
 }
 
 // 保存日志数据
-func (n *Node) saveLogEntry(entry LogEntry) {
+func (n *Node) saveLogEntry(entry *LogEntry) {
     lastLogId := n.getLastLogId()
     if entry.Id < lastLogId {
         glog.Warning(fmt.Sprintf("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId))
@@ -314,39 +350,39 @@ func (n *Node) saveLogEntry(entry LogEntry) {
             }
 
     }
-    n.addLogCount()
     n.setLastLogId(entry.Id)
     n.setDataDirty(true)
 }
 
-// 从目标节点同步数据，采用增量+全量模式
+// 从目标节点同步数据，采用增量模式
 // follower<-leader
 func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
-    // 如果有goroutine正在同步，那么放弃本次同步
-    if n.getStatusInReplication() {
-        return
-    }
-    n.setStatusInReplication(true)
-    defer n.setStatusInReplication(false)
     if n.getLastLogId() < msg.Info.LastLogId {
-        n.updateFromLogEntriesJson(msg.Body)
+        array := make([]LogEntry, 0)
+        err   := gjson.DecodeTo(msg.Body, &array)
+        if err != nil {
+            glog.Error(err)
+            return
+        }
+        if array != nil && len(array) > 0 {
+            for _, v := range array {
+                if v.Id > n.getLastLogId() {
+                    n.LogList.PushFront(&v)
+                    n.saveLogEntry(&v)
+                }
+            }
+        }
     }
 }
 
 // 同步数据到目标节点，采用增量模式
 // leader->follower
-func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
-    // 如果正在进行数据同步，那么退出等待下次操作
-    if n.getStatusInReplication() {
-        return
-    }
-    n.setStatusInReplication(true)
-    defer n.setStatusInReplication(false)
+func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
     // 支持分批同步，如果数据量大，每一次增量同步大小不超过1万条
-    logid := msg.Info.LastLogId
-    if n.getLastLogId() > msg.Info.LastLogId {
+    logid := info.LastLogId
+    if n.getLastLogId() > info.LastLogId {
         if logid == 0 || (logid != 0 && n.isValidLogId(logid)) {
-            glog.Println("start data incremental replication from", n.getName(), "to", msg.Info.Name)
+            glog.Println("start data incremental replication from", n.getName(), "to", info.Name)
             for {
                 list    := n.getLogEntriesByLastLogId(logid, 10000)
                 length  := len(list)
@@ -370,7 +406,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
                 }
             }
         } else {
-            glog.Println("failed in data replication from", n.getName(), "to", msg.Info.Name, ", invalid log id:", logid)
+            glog.Println("failed in data replication from", n.getName(), "to", info.Name, ", invalid log id:", logid)
         }
     }
 }
@@ -378,7 +414,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, msg *Msg) {
 // 从目标节点同步Service数据
 // follower<-leader
 func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
-    //glog.Println("receive service replication update from", msg.Info.Name)
+    defer conn.Close()
     m   := make(map[string]ServiceStruct)
     err := gjson.DecodeTo(msg.Body, &m)
     if err == nil {
@@ -399,8 +435,8 @@ func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
 
 // 同步Service到目标节点
 // leader->follower
-func (n *Node) updateServiceToRemoteNode(conn net.Conn, msg *Msg) {
-    //glog.Println("send service replication update to", msg.Info.Name)
+func (n *Node) updateServiceToRemoteNode(conn net.Conn) {
+    defer conn.Close()
     if err := n.sendMsg(conn, gMSG_REPL_SERVICE_COMPLETELY_UPDATE, gjson.Encode(*n.ServiceForApi.Clone())); err != nil {
         glog.Error(err)
         return
