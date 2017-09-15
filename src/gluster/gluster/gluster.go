@@ -111,6 +111,7 @@ type Msg struct {
 type Node struct {
     mutex               sync.RWMutex             // 通用锁，可以使用不同的锁来控制对应变量以提高读写效率
     dmutex              sync.RWMutex             // DataMap锁，用以保证KV请求的先进先出队列执行
+    smutex              sync.RWMutex             // Service锁
 
     Group               string                   // 集群名称
     Id                  string                   // 节点ID(根据算法自动生成的集群唯一名称)
@@ -135,22 +136,11 @@ type Node struct {
     UncommittedLogs      *gcache.Cache            // uncommitted log entry缓存对象
     SavePath             string                   // 物理存储的本地数据*目录*绝对路径
     Service              *gmap.StringInterfaceMap // 存储的服务配置表
-    ServiceForApi        *gmap.StringInterfaceMap // 用于提高Service API响应的冗余map变量，内容与Service成员变量相同，但结构不同
     DataMap              *gmap.StringStringMap    // 存储的K-V哈希表
-
-    IsDataDirty           bool                    // 数据库是否已经有修改，用于判断是否需要物理化
-    IsServiceDirty        bool                    // Service是否已经有修改，用于判断是否需要物理化
 }
 
 // 服务对象
 type Service struct {
-    Name  string
-    Type  string
-    Node  *gmap.StringInterfaceMap
-}
-
-// 用以可直接json化处理的Service数据结构
-type ServiceStruct struct {
     Name  string                 `json:"name"`
     Type  string                 `json:"type"`
     Node  map[string]interface{} `json:"node"`
@@ -232,7 +222,6 @@ func NewServer() *Node {
         LogList             : glist.NewSafeList(),
         UncommittedLogs     : gcache.New(),
         Service             : gmap.NewStringInterfaceMap(),
-        ServiceForApi       : gmap.NewStringInterfaceMap(),
         DataMap             : gmap.NewStringStringMap(),
     }
     ips, err := gip.IntranetIP()

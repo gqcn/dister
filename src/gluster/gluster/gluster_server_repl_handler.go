@@ -156,7 +156,6 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
         }
         if updated {
             n.setLastServiceLogId(gtime.Microsecond())
-            n.setServiceDirty(true)
         }
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
@@ -164,12 +163,14 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
 
 // Service设置
 func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
-    var st ServiceStruct
-    if gjson.DecodeTo(msg.Body, &st) == nil {
-        n.Service.Set(st.Name, *n.serviceSructToService(&st))
-        n.ServiceForApi.Set(st.Name, st)
+    var s Service
+    if gjson.DecodeTo(msg.Body, &s) == nil {
+        sg := gmap.NewStringInterfaceMap()
+        sg.BatchSet(*n.Service.Clone())
+        sg.Set(s.Name, s)
+
+        n.setService(sg)
         n.setLastServiceLogId(gtime.Microsecond())
-        n.setServiceDirty(true)
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
@@ -351,7 +352,6 @@ func (n *Node) saveLogEntry(entry *LogEntry) {
 
     }
     n.setLastLogId(entry.Id)
-    n.setDataDirty(true)
 }
 
 // 从目标节点同步数据，采用增量模式
@@ -415,19 +415,15 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
 // follower<-leader
 func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
     defer conn.Close()
-    m   := make(map[string]ServiceStruct)
+    m   := make(map[string]Service)
     err := gjson.DecodeTo(msg.Body, &m)
     if err == nil {
-        newmForService    := gmap.NewStringInterfaceMap()
-        newmForServiceApi := gmap.NewStringInterfaceMap()
+        newm := gmap.NewStringInterfaceMap()
         for k, v := range m {
-            newmForService.Set(k, *n.serviceSructToService(&v))
-            newmForServiceApi.Set(k, v)
+            newm.Set(k, v)
         }
-        n.setService(newmForService)
-        n.setServiceForApi(newmForServiceApi)
+        n.setService(newm)
         n.setLastServiceLogId(msg.Info.LastServiceLogId)
-        n.setServiceDirty(true)
     } else {
         glog.Error(err)
     }
@@ -437,7 +433,7 @@ func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
 // leader->follower
 func (n *Node) updateServiceToRemoteNode(conn net.Conn) {
     defer conn.Close()
-    if err := n.sendMsg(conn, gMSG_REPL_SERVICE_COMPLETELY_UPDATE, gjson.Encode(*n.ServiceForApi.Clone())); err != nil {
+    if err := n.sendMsg(conn, gMSG_REPL_SERVICE_COMPLETELY_UPDATE, gjson.Encode(n.Service)); err != nil {
         glog.Error(err)
         return
     }

@@ -37,14 +37,14 @@ import (
 func (this *NodeApiService) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     name := r.GetRequestString("name")
     if name == "" {
-        if this.node.ServiceForApi.Size() > 100 {
+        if this.node.Service.Size() > 100 {
             w.ResponseJson(0, "too large service size, need a service name to search", nil)
         } else {
-            w.ResponseJson(1, "ok", *this.node.ServiceForApi.Clone())
+            w.ResponseJson(1, "ok", *this.node.Service.Clone())
         }
     } else {
         if this.node.Service.Contains(name) {
-            w.ResponseJson(1, "ok", this.node.ServiceForApi.Get(name))
+            w.ResponseJson(1, "ok", this.node.Service.Get(name))
         } else {
             w.ResponseJson(0, "service not found", nil)
         }
@@ -59,7 +59,7 @@ func (this *NodeApiService) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
 
 // service 修改
 func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    list := make([]ServiceStruct, 0)
+    list := make([]Service, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {
         w.ResponseJson(0, "invalid data type: " + err.Error(), nil)

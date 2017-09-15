@@ -29,7 +29,7 @@ func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
             if err != nil {
                 w.ResponseJson(0, err.Error(), nil)
             } else {
-                gcache.Set(k, result, 1)
+                gcache.Set(k, result, 1000)
                 r = result
             }
         }
@@ -39,12 +39,12 @@ func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
 
 // 查询存货的service, 并根据priority计算负载均衡，取出一条返回
 func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}, error) {
-    if !this.node.ServiceForApi.Contains(name) {
+    if !this.node.Service.Contains(name) {
         return nil, errors.New(fmt.Sprintf("no service named '%s'", name))
     }
-    st   := this.node.ServiceForApi.Get(name).(ServiceStruct)
+    s    := this.node.Service.Get(name).(Service)
     list := make([]PriorityNode, 0)
-    for k, v := range st.Node {
+    for k, v := range s.Node {
         m := v.(map[string]interface{})
         status, ok := m["status"]
         if !ok || status.(int) == 0 {
@@ -66,7 +66,7 @@ func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}
     if nodename == "" {
         return nil, errors.New("get node by balance failed, please check the data structure of the service")
     }
-    return st.Node[nodename], nil
+    return s.Node[nodename], nil
 }
 
 // 根据priority计算负载均衡

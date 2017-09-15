@@ -12,7 +12,8 @@
         "type" : "tcp",
         "node" : {
             "node1": {"host":"192.168.2.15", "port": "11211", "priority": "100", "interval" : "2000"},
-            "node2": {"host":"192.168.2.18", "port": "11211", "priority": "100", "interval" : "2000"}
+            "node2": {"host":"192.168.2.18", "port": "11211", "priority": "100", "interval" : "2000"},
+            "node3": {"host":"127.0.0.1",    "port": "11211", "priority": "100", "interval" : "2000"}
         }
     },
     {

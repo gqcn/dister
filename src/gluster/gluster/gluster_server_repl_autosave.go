@@ -15,16 +15,18 @@ import (
 
 // 日志自动保存处理
 func (n *Node) autoSavingHandler() {
+    lastLogId     := n.getLastLogId()
+    lastServiceId := n.getLastServiceLogId()
     for {
         n.saveLogList()
         n.savePeersToFile()
-        if n.getDataDirty() {
+        if n.getLastLogId() != lastLogId {
             n.saveDataToFile()
-            n.setDataDirty(false)
+            lastLogId = n.getLastLogId()
         }
-        if n.getServiceDirty() {
+        if n.getLastServiceLogId() != lastServiceId {
             n.saveServiceToFile()
-            n.setServiceDirty(false)
+            lastServiceId = n.getLastServiceLogId()
         }
         time.Sleep(gLOG_REPL_AUTOSAVE_INTERVAL * time.Millisecond)
     }
@@ -103,7 +105,7 @@ func (n *Node) saveServiceToFile() {
     data := make(map[string]interface{})
     data  = map[string]interface{} {
         "LastServiceLogId"  : n.getLastServiceLogId(),
-        "Service"           : *n.serviceMapToServiceStructMap(),
+        "Service"           : *n.Service.Clone(),
     }
     content := []byte(gjson.Encode(&data))
     if gCOMPRESS_SAVING {
@@ -195,12 +197,12 @@ func (n *Node) restoreService() {
         }
         if bin != nil && len(bin) > 0 {
             //glog.Println("restore service from", path)
-            m := make(map[string]ServiceStruct)
+            m := make(map[string]Service)
             j := gjson.DecodeToJson(string(bin))
             n.setLastServiceLogId(j.GetInt64("LastServiceLogId"))
             if err := j.GetToVar("Service", &m); err == nil {
                 for k, v := range m {
-                    n.Service.Set(k, *n.serviceSructToService(&v))
+                    n.Service.Set(k, v)
                 }
             } else {
                 glog.Error(err)

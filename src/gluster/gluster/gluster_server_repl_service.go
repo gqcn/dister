@@ -2,100 +2,75 @@ package gluster
 
 import (
     "time"
-    "g/util/gtime"
     "strings"
-    "sync"
     "g/database/gdb"
     "g/net/ghttp"
     "g/core/types/gmap"
     "strconv"
     "g/os/gcache"
     "os/exec"
-    "os/user"
+    "fmt"
+    "g/util/gtime"
+    "reflect"
+    "g/os/glog"
+    "errors"
 )
 
-// 将Service转为可json化的数据结构
-func (n *Node) serviceMapToServiceStructMap() *map[string]ServiceStruct {
-    stm := make(map[string]ServiceStruct)
-    for k, v := range *n.Service.Clone() {
-        s     := v.(Service)
-        stm[k] = *n.serviceToServiceStruct(&s)
+// 获取用于健康检查的Service列表
+func (n *Node) getServiceListForCheck() []Service {
+    key := fmt.Sprintf("gluster_service_list_for_check_%v", n.getLastServiceLogId())
+    l   := make([]Service, 0)
+    r   := gcache.Get(key)
+    if r == nil {
+        for _, v := range n.Service.Values() {
+            l = append(l, v.(Service))
+        }
+        gcache.Set(key, l, 60000)
+    } else {
+        l = r.([]Service)
     }
-    return &stm
-}
-
-// 将Service对象转换为ServiceStruct对象，以便json化
-func (n *Node) serviceToServiceStruct(s *Service) *ServiceStruct {
-    var st ServiceStruct
-    st.Name = s.Name
-    st.Type = s.Type
-    st.Node = make(map[string]interface{})
-    for k, v := range *s.Node.Clone() {
-        m := v.(*gmap.StringInterfaceMap)
-        st.Node[k] = *m.Clone()
-    }
-    return &st
-}
-
-// 将ServiceStruct对象转换为Service对象
-func (n *Node) serviceSructToService(st *ServiceStruct) *Service {
-    var s Service
-    s.Name = st.Name
-    s.Type = st.Type
-    s.Node = gmap.NewStringInterfaceMap()
-    for k, v := range st.Node {
-        m := gmap.NewStringInterfaceMap()
-        m.BatchSet(v.(map[string]interface{}))
-        s.Node.Set(k, m)
-    }
-    return &s
+    return l
 }
 
 // 服务健康检查回调函数
 func (n *Node) serviceHealthCheckHandler() {
-    start := gtime.Millisecond()
     for {
-        if n.getRaftRole() == gROLE_RAFT_LEADER && gtime.Millisecond() > start {
-            for _, v := range n.Service.Values() {
-                service := v.(Service)
-                go func(s *Service) {
-                    n.checkServiceHealth(s)
-
+        if n.getRaftRole() == gROLE_RAFT_LEADER {
+            for _, v := range n.getServiceListForCheck() {
+                service := v
+                go func(service *Service) {
+                    n.checkServiceHealth(n.Service, service)
                 }(&service)
             }
-            start = gtime.Millisecond() + gSERVICE_HEALTH_CHECK_INTERVAL
         }
-        time.Sleep(100 * time.Millisecond)
+        time.Sleep(2000 * time.Millisecond)
     }
 }
 
 // 服务健康检测
 // 如果新增检测类型，需要更新该方法
-func (n *Node) checkServiceHealth(service *Service) {
-    var wg sync.WaitGroup
-    // 用以标识本分组的Service是否有更新
-    updated := false
-    for k, v := range *service.Node.Clone() {
-        wg.Add(1)
-        go func(name string, m *gmap.StringInterfaceMap, u *bool) {
-            cachekey  := "gluster_service_" + service.Name + "_" + name + "_check"
+func (n *Node) checkServiceHealth(group *gmap.StringInterfaceMap, service *Service) {
+    //glog.Println(service.Name)
+    for k, v := range service.Node {
+        if reflect.TypeOf(v).String() != "map[string]interface {}" {
+            continue
+        }
+        name := k
+        node := gmap.NewStringInterfaceMap()
+        node.BatchSet(v.(map[string]interface {}))
+        go func(name string, m *gmap.StringInterfaceMap) {
+            cachekey  := fmt.Sprintf("gluster_service_%s_%s_check", service.Name, name)
             needcheck := gcache.Get(cachekey)
             if needcheck != nil {
                 return
             }
-            //glog.Printf("start checking node: %s, name: %s, \n", name, service.Name)
+            gcache.Set(cachekey, 1, 5000)
             ostatus := m.Get("status")
-            switch strings.ToLower(service.Type) {
-                case "mysql":  fallthrough
-                case "pgsql":  n.dbHealthCheck(service.Type, m)
-                case "web":    n.tcpHealthCheck(m)
-                case "tcp":    n.webHealthCheck(m)
-                case "custom": n.customHealthCheck(m)
-            }
+            n.checkServiceNodeItem(service, name, m)
             nstatus := m.Get("status")
             if ostatus != nstatus {
-                (*u) = true
-                //glog.Printf("service updated, node: %s, from %v to %v, name: %s, \n", name, ostatus, nstatus, service.Name)
+                n.updateServiceNode(group, service, name, *m.Clone())
+                glog.Printf("service updated, node: %s, from %v to %v, name: %s, \n", name, ostatus, nstatus, service.Name)
             }
             interval := m.Get("interval")
             timeout  := int64(gSERVICE_HEALTH_CHECK_INTERVAL)
@@ -103,51 +78,54 @@ func (n *Node) checkServiceHealth(service *Service) {
                 timeout, _ = strconv.ParseInt(interval.(string), 10, 64)
             }
             // 缓存时间是按照秒进行缓存，因此需要将毫秒转换为秒
-            gcache.Set(cachekey, 1, int(timeout/1000))
-            wg.Done()
-        }(k, v.(*gmap.StringInterfaceMap), &updated)
-    }
-    wg.Wait()
-    // 从Service对象为基础，新创建一个ServiceStruct，更新到API接口变量中，以便提高接口查询效率
-    // 以空间换时间的方式，在ServiceForApi中已有的变量会被新变量替换，但旧变量不会马上消失，而是转交给GC处理
-    if updated {
-        n.ServiceForApi.Set(service.Name, *n.serviceToServiceStruct(service))
-        n.setLastServiceLogId(gtime.Microsecond())
-        n.setServiceDirty(true)
+            gcache.Set(cachekey, 1, timeout)
+        }(name, node)
     }
 }
 
-// TCP链接健康检查
-func (n *Node) tcpHealthCheck(item *gmap.StringInterfaceMap) {
-    host := item.Get("host")
-    port := item.Get("port")
-    if host == nil || port == nil {
-        return
+// 健康检测服务项
+func (n *Node) checkServiceNodeItem(service *Service, name string, m *gmap.StringInterfaceMap) {
+    var err error
+    glog.Println("start checking", service.Name, service.Type, name, m.Clone())
+    switch strings.ToLower(service.Type) {
+        case "mysql":  fallthrough
+        case "pgsql":  err = n.dbHealthCheck(service.Type, m)
+        case "web":    err = n.webHealthCheck(m)
+        case "tcp":    err = n.tcpHealthCheck(m)
+        case "custom": err = n.customHealthCheck(m)
     }
-    p, err := strconv.Atoi(port.(string))
     if err != nil {
-        item.Set("status", 0)
+        glog.Errorf("%s - %s: %s\n", service.Name, name, err.Error())
+    }
+}
+
+// 更新Service服务项的指定节点
+func (n *Node) updateServiceNode(group *gmap.StringInterfaceMap, service *Service, name string, m map[string]interface{}) {
+    n.smutex.Lock()
+    defer n.smutex.Unlock()
+
+    service.Node[name] = m
+    group.Set(service.Name, *service)
+    fmt.Printf("%p\n", group)
+    fmt.Printf("%p\n", n.Service)
+    // 判断地址是否相等，如果不相等，表示服务有更新，当前健康检测的结果将被废弃掉
+    if group == n.Service {
+        n.setLastServiceLogId(gtime.Microsecond())
     } else {
-        conn := n.getConn(host.(string), p)
-        if conn != nil {
-            item.Set("status", 1)
-            conn.Close()
-        } else {
-            item.Set("status", 0)
-        }
+        glog.Println("service changed, ignore this updates")
     }
 }
 
 // MySQL/PostgreSQL数据库健康检查
 // 使用并发方式并行测试同一个配置中的数据库链接
-func (n *Node) dbHealthCheck(stype string, item *gmap.StringInterfaceMap) {
+func (n *Node) dbHealthCheck(stype string, item *gmap.StringInterfaceMap) error {
     host := item.Get("host")
     port := item.Get("port")
     user := item.Get("user")
     pass := item.Get("pass")
     name := item.Get("database")
     if host == nil || port == nil || user == nil || pass == nil || name == nil {
-        return
+        return errors.New(fmt.Sprintf("invalid config of service item: %v", item.Clone()))
     }
     dbcfg   := gdb.ConfigNode{
         Host    : host.(string),
@@ -168,27 +146,55 @@ func (n *Node) dbHealthCheck(stype string, item *gmap.StringInterfaceMap) {
         }
         db.Close()
     }
+    return nil
 }
 
 // WEB健康检测
-func (n *Node) webHealthCheck(item *gmap.StringInterfaceMap) {
+func (n *Node) webHealthCheck(item *gmap.StringInterfaceMap) error {
     url := item.Get("url")
-    if url != nil {
-        r := ghttp.Get(url.(string))
-        if r == nil || r.StatusCode != 200 {
-            item.Set("status", 0)
-        } else {
+    if url == nil {
+        return errors.New(fmt.Sprintf("invalid config of service item: %v", item.Clone()))
+    }
+    r := ghttp.Get(url.(string))
+    if r == nil || r.StatusCode != 200 {
+        item.Set("status", 0)
+    } else {
+        item.Set("status", 1)
+    }
+    if r != nil {
+        r.Close()
+    }
+    return nil
+}
+
+// TCP链接健康检查
+func (n *Node) tcpHealthCheck(item *gmap.StringInterfaceMap) error {
+    host := item.Get("host")
+    port := item.Get("port")
+    if host == nil || port == nil {
+        return errors.New(fmt.Sprintf("invalid config of service item: %v", item.Clone()))
+    }
+    p, err := strconv.Atoi(port.(string))
+    if err != nil {
+        item.Set("status", 0)
+    } else {
+        conn := n.getConn(host.(string), p)
+        if conn != nil {
             item.Set("status", 1)
-        }
-        if r != nil {
-            r.Close()
+            conn.Close()
+        } else {
+            item.Set("status", 0)
         }
     }
+    return nil
 }
 
 // 自定义程序健康检测
-func (n *Node) customHealthCheck(item *gmap.StringInterfaceMap) {
+func (n *Node) customHealthCheck(item *gmap.StringInterfaceMap) error {
     script := item.Get("script")
+    if script == nil {
+        return errors.New(fmt.Sprintf("invalid config of service item: %v", item.Clone()))
+    }
     parts  := strings.Fields(script.(string))
     result := 0
     if len(parts) > 1 {
@@ -208,4 +214,5 @@ func (n *Node) customHealthCheck(item *gmap.StringInterfaceMap) {
 
     }
     item.Set("status", result)
+    return nil
 }

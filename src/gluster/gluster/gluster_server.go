@@ -568,20 +568,6 @@ func (n *Node) getLogEntryFileSavePathById(id int64) string {
     return path
 }
 
-func (n *Node) getDataDirty() bool {
-    n.mutex.RLock()
-    r := n.IsDataDirty
-    n.mutex.RUnlock()
-    return r
-}
-
-func (n *Node) getServiceDirty() bool {
-    n.mutex.RLock()
-    r := n.IsServiceDirty
-    n.mutex.RUnlock()
-    return r
-}
-
 // 添加比分节
 func (n *Node) addScore(s int64) {
     n.mutex.Lock()
@@ -637,18 +623,6 @@ func (n *Node) setRole(role int) {
 
 }
 
-func (n *Node) setDataDirty(b bool) {
-    n.mutex.Lock()
-    n.IsDataDirty = b
-    n.mutex.Unlock()
-}
-
-func (n *Node) setServiceDirty(b bool) {
-    n.mutex.Lock()
-    n.IsServiceDirty = b
-    n.mutex.Unlock()
-}
-
 func (n *Node) setRaftRole(role int) {
     n.mutex.Lock()
     if n.RaftRole != role {
@@ -694,18 +668,9 @@ func (n *Node) setService(m *gmap.StringInterfaceMap) {
     if m == nil {
         return
     }
-    n.mutex.Lock()
+    n.smutex.Lock()
     n.Service = m
-    n.mutex.Unlock()
-}
-
-func (n *Node) setServiceForApi(m *gmap.StringInterfaceMap) {
-    if m == nil {
-        return
-    }
-    n.mutex.Lock()
-    n.ServiceForApi = m
-    n.mutex.Unlock()
+    n.smutex.Unlock()
 }
 
 func (n *Node) setPeers(m *gmap.StringInterfaceMap) {
