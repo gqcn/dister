@@ -30,34 +30,36 @@ package gluster
 import (
     "g/net/ghttp"
     "g/encoding/gjson"
+    "errors"
+    "fmt"
+    "reflect"
 )
 
-
-// service 查询
+// Service 查询
 func (this *NodeApiService) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     name := r.GetRequestString("name")
     if name == "" {
-        if this.node.Service.Size() > 100 {
+        if this.node.Service.Size() > 1000 {
             w.ResponseJson(0, "too large service size, need a service name to search", nil)
         } else {
-            w.ResponseJson(1, "ok", *this.node.Service.Clone())
+            w.ResponseJson(1, "ok", this.node.getServiceMapForApi())
         }
     } else {
-        if this.node.Service.Contains(name) {
-            w.ResponseJson(1, "ok", this.node.Service.Get(name))
+        sc := this.node.getServiceForApiByName(name)
+        if sc != nil {
+            w.ResponseJson(1, "ok", sc)
         } else {
             w.ResponseJson(0, "service not found", nil)
         }
     }
 }
 
-// service 新增
-// @todo 完善service数据结构检查，这块会很复杂
+// Service 新增
 func (this *NodeApiService) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     this.Post(r, w)
 }
 
-// service 修改
+// Service 修改
 func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]ServiceConfig, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
@@ -65,6 +67,15 @@ func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse
         w.ResponseJson(0, "invalid data type: " + err.Error(), nil)
         return
     }
+    // 数据验证
+    for _, v := range list {
+        err  = validateServiceConfig(&v)
+        if err != nil {
+            w.ResponseJson(0, err.Error(), nil)
+            return
+        }
+    }
+    // 提交数据到leader
     for _, v := range list {
         err  = this.node.SendToLeader(gMSG_API_SERVICE_SET, gPORT_REPL, gjson.Encode(v))
         if err != nil {
@@ -75,18 +86,53 @@ func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse
     w.ResponseJson(1, "ok", nil)
 }
 
-//func validateNodeItemByType(nodeItem interface{}, itemType string) error {
-//    switch itemType {
-//        case "mysql": fallthrough
-//        case "pgsql":
-//
-//        case "web":
-//        case "custom":
-//
-//    }
-//}
+// 验证Service提交参数
+func validateServiceConfig(sc *ServiceConfig) error {
+    for k, m := range sc.Node {
+        commonError := errors.New(fmt.Sprintf("invalid config of service: %s, type: %s, node index: %d", sc.Name, sc.Type, k))
+        switch sc.Type {
+            case "pgsql": fallthrough
+            case "mysql":
+                host, _ := m["host"]
+                port, _ := m["port"]
+                user, _ := m["user"]
+                pass, _ := m["pass"]
+                name, _ := m["database"]
+                if host == nil || port == nil || user == nil || pass == nil || name == nil ||
+                    reflect.TypeOf(host).String() != "string" ||
+                    reflect.TypeOf(port).String() != "string" ||
+                    reflect.TypeOf(user).String() != "string" ||
+                    reflect.TypeOf(pass).String() != "string" ||
+                    reflect.TypeOf(name).String() != "string" {
+                    return commonError
+                }
 
-// service 删除
+            case "tcp":
+                host, _ := m["host"]
+                port, _ := m["port"]
+                if host == nil || port == nil ||
+                    reflect.TypeOf(host).String() != "string" ||
+                    reflect.TypeOf(port).String() != "string" {
+                    return commonError
+                }
+
+            case "web":
+                url, _ := m["url"]
+                if url == nil || reflect.TypeOf(url).String() != "string" {
+                    return commonError
+                }
+
+            case "custom":
+                script, _ := m["script"]
+                if script == nil || reflect.TypeOf(script).String() != "string" {
+                    return commonError
+                }
+        }
+    }
+    return nil
+}
+
+// Service 删除
 func (this *NodeApiService) Delete(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
@@ -101,3 +147,5 @@ func (this *NodeApiService) Delete(r *ghttp.ClientRequest, w *ghttp.ServerRespon
         w.ResponseJson(1, "ok", nil)
     }
 }
+
+

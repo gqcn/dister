@@ -147,19 +147,7 @@ func (n *Node) onMsgServiceCompletelyUpdate(conn net.Conn, msg *Msg) {
 func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
     list := make([]string, 0)
     if gjson.DecodeTo(msg.Body, &list) == nil {
-        updated := false
-        for _, name := range list {
-            for i := 0;; i++ {
-                key := n.getServiceKeyByNameAndIndex(name, i)
-                if n.Service.Contains(key) {
-                    n.Service.Remove(key)
-                    updated = true
-                } else {
-                    break;
-                }
-            }
-        }
-        if updated {
+        if n.removeServiceByNames(list) {
             n.setLastServiceLogId(gtime.Microsecond())
         }
     }
@@ -170,6 +158,7 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
 func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
     var sc ServiceConfig
     if gjson.DecodeTo(msg.Body, &sc) == nil {
+        n.removeServiceByNames([]string{sc.Name})
         for k, v := range sc.Node {
             key := n.getServiceKeyByNameAndIndex(sc.Name, k)
             n.Service.Set(key, Service{ sc.Type, v })

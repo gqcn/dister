@@ -8,6 +8,7 @@ import (
     "g/encoding/gjson"
     "g/os/gfile"
     "encoding/json"
+    "strconv"
 )
 
 // 查看集群节点
@@ -114,9 +115,19 @@ func cmd_kvs () {
     }
     m := data.GetMap("data")
     if len(m) > 0 {
-        fmt.Printf("%32s : %s\n", "K", "V")
+        // 自动计算key的宽度
+        length := 0
+        for k, _ := range m {
+            if len(k) > length {
+                length = len(k)
+            }
+        }
+        lenstr := strconv.Itoa(length)
+        format1 := "%-" + lenstr + "s : %s\n"
+        format2 := "%-" + lenstr + "s : %.100s\n"
+        fmt.Printf(format1, "KEY", "VALUE")
         for k, v := range m {
-            fmt.Printf("%32.32s : %.100s\n", k, v)
+            fmt.Printf(format2, k, v)
         }
     } else {
         fmt.Println("it's empty")
