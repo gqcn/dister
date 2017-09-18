@@ -145,13 +145,18 @@ func (n *Node) onMsgServiceCompletelyUpdate(conn net.Conn, msg *Msg) {
 
 // Service删除
 func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
-    list := make([]interface{}, 0)
+    list := make([]string, 0)
     if gjson.DecodeTo(msg.Body, &list) == nil {
         updated := false
         for _, name := range list {
-            if n.Service.Contains(name.(string)) {
-                n.Service.Remove(name.(string))
-                updated = true
+            for i := 0;; i++ {
+                key := n.getServiceKeyByNameAndIndex(name, i)
+                if n.Service.Contains(key) {
+                    n.Service.Remove(key)
+                    updated = true
+                } else {
+                    break;
+                }
             }
         }
         if updated {
@@ -163,13 +168,12 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
 
 // Service设置
 func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
-    var s Service
-    if gjson.DecodeTo(msg.Body, &s) == nil {
-        sg := gmap.NewStringInterfaceMap()
-        sg.BatchSet(*n.Service.Clone())
-        sg.Set(s.Name, s)
-
-        n.setService(sg)
+    var sc ServiceConfig
+    if gjson.DecodeTo(msg.Body, &sc) == nil {
+        for k, v := range sc.Node {
+            key := n.getServiceKeyByNameAndIndex(sc.Name, k)
+            n.Service.Set(key, Service{ sc.Type, v })
+        }
         n.setLastServiceLogId(gtime.Microsecond())
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")

@@ -59,7 +59,7 @@ func (this *NodeApiService) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
 
 // service 修改
 func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    list := make([]Service, 0)
+    list := make([]ServiceConfig, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {
         w.ResponseJson(0, "invalid data type: " + err.Error(), nil)

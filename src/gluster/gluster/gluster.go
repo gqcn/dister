@@ -139,11 +139,17 @@ type Node struct {
     DataMap              *gmap.StringStringMap    // 存储的K-V哈希表
 }
 
-// 服务对象
+// 服务节点对象
 type Service struct {
-    Name  string                 `json:"name"`
-    Type  string                 `json:"type"`
-    Node  map[string]interface{} `json:"node"`
+    Type  string
+    Node  map[string]interface{}
+}
+
+// 服务信息配置对象
+type ServiceConfig struct {
+    Name  string                   `json:"name"`
+    Type  string                   `json:"type"`
+    Node  []map[string]interface{} `json:"node"`
 }
 
 // 用于KV API接口的对象
