@@ -50,7 +50,7 @@ func (n *Node) getServiceMap() *map[string]ServiceConfig {
                 m[name]    = *scptr
             }
         }
-        gcache.Set(key, &m, 0)
+        gcache.Set(key, &m, 60000)
         return &m
     } else {
         return r.(*map[string]ServiceConfig)
@@ -66,7 +66,7 @@ func (n *Node) getServiceMapForApi() interface{} {
         sApiMutex.RLock()
         defer sApiMutex.RUnlock()
         result = gjson.Decode(gjson.Encode(*m))
-        gcache.Set(key, result, 0)
+        gcache.Set(key, result, 60000)
         return result
     }
     return result
@@ -83,7 +83,7 @@ func (n *Node) getServiceForApiByName(name string) interface{} {
         if r, ok := (*m)[name]; ok {
             var sc ServiceConfig
             if gjson.DecodeTo(gjson.Encode(r), &sc) == nil {
-                gcache.Set(key, sc, 0)
+                gcache.Set(key, sc, 60000)
                 return sc
             }
         }

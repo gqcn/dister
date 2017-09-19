@@ -30,7 +30,7 @@ func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
                 return
             } else {
                 result = r
-                gcache.Set(key, result, 0)
+                gcache.Set(key, result, 60000)
             }
         }
         w.ResponseJson(1, "ok", result)
