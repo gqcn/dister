@@ -207,20 +207,24 @@ func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) b
         }
     }
 
-    var clientok   int32 = 0 // 是否完成请求节点请求成功
-    var serverok   int32 = 0 // 是否完成1个server请求成功
-    var failCount  int32 = 0 // 失败请求数
-    var doneCount  int32 = 0 // 成功请求数
-    var aliveCount int32 = 0 // 总共发送的请求 = 失败请求数 + 成功请求数
+    var clientok    int32 = 0 // 是否完成请求节点请求成功
+    var serverok    int32 = 0 // 是否完成1个server请求成功
+    var failCount   int32 = 0 // 失败请求数
+    var doneCount   int32 = 0 // 成功请求数
+    var aliveCount  int32 = 0 // 活跃的节点数/总共发送的请求 = 失败请求数 + 成功请求数
+    var serverCount int32 = 0 // 集群中的Server节点数量
     // 如果本地就是leader
     if clientId == n.getId() {
         clientok = 1
     }
-    result := false
+    result := true
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {
             continue
+        }
+        if info.Role == gROLE_SERVER {
+            serverCount++
         }
         aliveCount++
         go func(info *NodeInfo, entry *LogEntry) {
@@ -246,9 +250,9 @@ func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) b
             }
         }(&info, &entry)
     }
-    // 等待执行结束
-    timeout := gtime.Second() + 3
-    for aliveCount > 0 {
+    // 等待执行结束，超时时间60秒
+    timeout := gtime.Second() + 60
+    for aliveCount > 0 && serverCount > 0 {
         if atomic.LoadInt32(&clientok) > 0 && atomic.LoadInt32(&serverok) > 0 {
             result = true
             break;
@@ -258,9 +262,11 @@ func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) b
             break;
         }
         if atomic.LoadInt32(&failCount) == aliveCount {
+            result = false
             break;
         }
         if atomic.LoadInt32(&failCount) > 0 && (atomic.LoadInt32(&failCount) + atomic.LoadInt32(&doneCount) == aliveCount) {
+            result = false
             break;
         }
         if gtime.Second() >= timeout {
