@@ -91,7 +91,8 @@ func (n *Node) Run() {
     go gtcp.NewServer(fmt.Sprintf(":%d", gPORT_RAFT),  n.raftTcpHandler).Run()
     go gtcp.NewServer(fmt.Sprintf(":%d", gPORT_REPL),  n.replTcpHandler).Run()
     go func() {
-        api := ghttp.NewServerByAddr(fmt.Sprintf(":%d", gPORT_API))
+        // API只能本地访问
+        api := ghttp.NewServerByAddr(fmt.Sprintf("127.0.0.1:%d", gPORT_API))
         api.BindController("/kv",      &NodeApiKv{node: n})
         api.BindController("/node",    &NodeApiNode{node: n})
         api.BindController("/service", &NodeApiService{node: n})
@@ -668,9 +669,9 @@ func (n *Node) setService(m *gmap.StringInterfaceMap) {
     if m == nil {
         return
     }
-    n.smutex.Lock()
+    n.mutex.Lock()
     n.Service = m
-    n.smutex.Unlock()
+    n.mutex.Unlock()
 }
 
 func (n *Node) setPeers(m *gmap.StringInterfaceMap) {

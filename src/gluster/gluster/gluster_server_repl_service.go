@@ -12,9 +12,87 @@ import (
     "g/util/gtime"
     "g/os/glog"
     "errors"
+    "regexp"
+    "sync"
+    "g/encoding/gjson"
 )
 
+// 用于Service API操作的读写锁
+var sApiMutex sync.RWMutex
+
+// 用于API访问，将Service转换为API方便查询的结构，并缓存
+func (n *Node) getServiceMap() *map[string]ServiceConfig {
+    key := fmt.Sprintf("gluster_service_map_for_api_%v", n.getLastServiceLogId())
+    r   := gcache.Get(key)
+    if r == nil {
+        sApiMutex.Lock()
+        defer sApiMutex.Unlock()
+        m      := make(map[string]ServiceConfig)
+        reg, _ := regexp.Compile(`^(\d+)\.(\w+)\.service\.gluster$`)
+        for k, v := range *n.Service.Clone() {
+            match := reg.FindStringSubmatch(k)
+            if match != nil {
+                s        := v.(Service)
+                scptr    := new(ServiceConfig)
+                name     := match[2]
+                rsc, ok  := m[name]
+                if !ok {
+                    scptr = &ServiceConfig {
+                        Name: name,
+                        Type: s.Type,
+                        Node: make([]map[string]interface{}, 0),
+                    }
+                } else {
+                    scptr = &rsc
+                }
+                // 注意：这里需要对Node的map数据进行深度拷贝(使用实现，缓存的时候可以不考虑效率)
+                scptr.Node = append(scptr.Node, gjson.Decode(gjson.Encode(s.Node)).(map[string]interface{}))
+                m[name]    = *scptr
+            }
+        }
+        gcache.Set(key, &m, 0)
+        return &m
+    } else {
+        return r.(*map[string]ServiceConfig)
+    }
+}
+
+// 用于API访问，查询所有Service配置
+func (n *Node) getServiceMapForApi() interface{} {
+    key    := fmt.Sprintf("gluster_service_map_value_for_api_%v", n.getLastServiceLogId())
+    result := gcache.Get(key)
+    if result == nil {
+        m := n.getServiceMap()
+        sApiMutex.RLock()
+        defer sApiMutex.RUnlock()
+        result = gjson.Decode(gjson.Encode(*m))
+        gcache.Set(key, result, 0)
+        return result
+    }
+    return result
+}
+
+// 用于API访问，查询单条Service配置，返回值为interface{}是为了API端处理方便
+func (n *Node) getServiceForApiByName(name string) interface{} {
+    key    := fmt.Sprintf("gluster_service_for_api_by_name_%s_%v", name, n.getLastServiceLogId())
+    result := gcache.Get(key)
+    if result == nil {
+        m := n.getServiceMap()
+        sApiMutex.RLock()
+        defer sApiMutex.RUnlock()
+        if r, ok := (*m)[name]; ok {
+            var sc ServiceConfig
+            if gjson.DecodeTo(gjson.Encode(r), &sc) == nil {
+                gcache.Set(key, sc, 0)
+                return sc
+            }
+        }
+    }
+    return result
+}
+
 // 获取用于健康检查的所有Service
+// 这里使用缓存降低Service.Clone压力，提高执行效率
 func (n *Node) getServiceListForCheck() map[string]Service {
     key := fmt.Sprintf("gluster_service_list_for_check_%v", n.getLastServiceLogId())
     m   := make(map[string]Service)
@@ -30,6 +108,24 @@ func (n *Node) getServiceListForCheck() map[string]Service {
     return m
 }
 
+// 根据名称列表删除Service
+// 返回值，true 表示有更新，false 表示没有更新(没有找到删除项)
+func (n *Node) removeServiceByNames(names []string) bool {
+    updated := false
+    for _, name := range names {
+        for i := 0;; i++ {
+            key := n.getServiceKeyByNameAndIndex(name, i)
+            if n.Service.Contains(key) {
+                n.Service.Remove(key)
+                updated = true
+            } else {
+                break;
+            }
+        }
+    }
+    return updated
+}
+
 // 服务健康检查回调函数
 func (n *Node) serviceHealthCheckHandler() {
     for {
@@ -38,7 +134,7 @@ func (n *Node) serviceHealthCheckHandler() {
                 go n.checkServiceHealth(k, v)
             }
         }
-        time.Sleep(2000 * time.Millisecond)
+        time.Sleep(100 * time.Millisecond)
     }
 }
 
@@ -53,19 +149,19 @@ func (n *Node) checkServiceHealth(skey string, node Service) {
     ostatus, _ := node.Node["status"]
     n.doCheckService(skey, &node)
     nstatus, _ := node.Node["status"]
-    if ostatus != nstatus {
-        n.smutex.Lock()
+    // 无论状态是int还是float64，这里统一转换为字符串进行比较
+    if fmt.Sprintf("%v", ostatus) != fmt.Sprintf("%v", nstatus) {
         n.Service.Set(skey, node)
         n.setLastServiceLogId(gtime.Millisecond())
-        n.smutex.Unlock()
-        glog.Printf("service updated, node: %s, from %v to %v\n", skey, ostatus, nstatus)
+        //glog.Printf("service updated, node: %s, from %v to %v\n", skey, ostatus, nstatus)
     }
-    interval, _ := node.Node["interval"]
+
     timeout     := int64(gSERVICE_HEALTH_CHECK_INTERVAL)
+    interval, _ := node.Node["interval"]
     if interval != nil {
         timeout, _ = strconv.ParseInt(interval.(string), 10, 64)
     }
-    // 缓存时间是按照秒进行缓存，因此需要将毫秒转换为秒
+
     gcache.Set(checkingKey, 1, timeout)
 }
 
@@ -120,7 +216,7 @@ func (n *Node) dbHealthCheck(node *Service) error {
 
 // WEB健康检测
 func (n *Node) webHealthCheck(node *Service) error {
-    url := node.Node["url"]
+    url, _ := node.Node["url"]
     if url == nil {
         return errors.New(fmt.Sprintf("invalid config of service item: %v", node.Node))
     }
@@ -188,5 +284,5 @@ func (n *Node) customHealthCheck(node *Service) error {
 
 // 根据服务的分组名称和节点索引生成对应的服务唯一键名
 func (n *Node) getServiceKeyByNameAndIndex(name string, index int) string {
-    return fmt.Sprintf("%d.%s.node.service.gluster", index, name)
+    return fmt.Sprintf("%d.%s.service.gluster", index, name)
 }

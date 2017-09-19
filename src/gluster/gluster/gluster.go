@@ -111,7 +111,6 @@ type Msg struct {
 type Node struct {
     mutex               sync.RWMutex             // 通用锁，可以使用不同的锁来控制对应变量以提高读写效率
     dmutex              sync.RWMutex             // DataMap锁，用以保证KV请求的先进先出队列执行
-    smutex              sync.RWMutex             // Service锁
 
     Group               string                   // 集群名称
     Id                  string                   // 节点ID(根据算法自动生成的集群唯一名称)
@@ -141,8 +140,8 @@ type Node struct {
 
 // 服务节点对象
 type Service struct {
-    Type  string
-    Node  map[string]interface{}
+    Type  string                   `json:"type"`
+    Node  map[string]interface{}   `json:"node"`
 }
 
 // 服务信息配置对象
@@ -183,7 +182,7 @@ type MonitorWebUI struct {
 }
 
 // 节点信息
-// @todo 通信内容进行简化
+// @todo 通信内容可以进一步进行简化
 type NodeInfo struct {
     Group            string `json:"group"`
     Id               string `json:"id"`

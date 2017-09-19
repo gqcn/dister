@@ -11,7 +11,7 @@ import (
 
 // 用于负载均衡计算的结构体
 type PriorityNode struct {
-    name     string
+    index    int
     priority int
 }
 
@@ -21,33 +21,33 @@ func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
     if name == "" {
         w.ResponseJson(0, "incomplete input: name is required", nil)
     } else {
-        // 高并发下的缓存处理，缓存时间为1秒
-        k := "gluster_service_balance_name_" + name
-        r := gcache.Get(k)
-        if r == nil {
-            result, err := this.getAliveServiceByPriority(name)
+        key    := fmt.Sprintf("gluster_service_balance_name_%s_%v", name, this.node.getLastServiceLogId())
+        result := gcache.Get(key)
+        if result == nil {
+            r, err := this.getAliveServiceByPriority(name)
             if err != nil {
                 w.ResponseJson(0, err.Error(), nil)
+                return
             } else {
-                gcache.Set(k, result, 1000)
-                r = result
+                result = r
+                gcache.Set(key, result, 0)
             }
         }
-        w.ResponseJson(1, "ok", r)
+        w.ResponseJson(1, "ok", result)
     }
 }
 
 // 查询存货的service, 并根据priority计算负载均衡，取出一条返回
 func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}, error) {
-    if !this.node.Service.Contains(name) {
+    r := this.node.getServiceForApiByName(name)
+    if r == nil {
         return nil, errors.New(fmt.Sprintf("no service named '%s'", name))
     }
-    s    := this.node.Service.Get(name).(Service)
+    s    := r.(ServiceConfig)
     list := make([]PriorityNode, 0)
-    for k, v := range s.Node {
-        m := v.(map[string]interface{})
+    for k, m := range s.Node {
         status, ok := m["status"]
-        if !ok || status.(int) == 0 {
+        if !ok || fmt.Sprintf("%v", status) == "0" {
             continue
         }
         priority, ok := m["priority"]
@@ -60,19 +60,19 @@ func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}
         }
     }
     if len(list) < 1 {
-        return nil, errors.New("service does not support balance, or no nodes in this service are alive")
+        return nil, errors.New("service does not support balance, or no nodes of this service are alive")
     }
-    nodename := this.getServiceByPriority(list)
-    if nodename == "" {
+    index := this.getServiceByPriority(list)
+    if index < 0 {
         return nil, errors.New("get node by balance failed, please check the data structure of the service")
     }
-    return s.Node[nodename], nil
+    return s.Node[index], nil
 }
 
 // 根据priority计算负载均衡
-func (this *NodeApiBalance) getServiceByPriority (list []PriorityNode) string {
+func (this *NodeApiBalance) getServiceByPriority (list []PriorityNode) int {
     if len(list) < 2 {
-        return list[0].name
+        return list[0].index
     }
     var total int
     for i := 0; i < len(list); i++ {
@@ -85,10 +85,10 @@ func (this *NodeApiBalance) getServiceByPriority (list []PriorityNode) string {
         max = min + list[i].priority * 100
         //fmt.Printf("r: %d, min: %d, max: %d\n", r, min, max)
         if r >= min && r < max {
-            return list[i].name
+            return list[i].index
         } else {
             min = max
         }
     }
-    return ""
+    return -1
 }
