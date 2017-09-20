@@ -93,9 +93,11 @@ func (n *Node) beginScore() {
 
     // 必需要获得多数派(n/2+1)比分（以保证能够连通绝大部分的节点）才能满足leader的基础条件
     // 注意这里的ScoreCount和n.Peers.Size都不包含自身
-    if (n.getScoreCount() + 1) < int((n.Peers.Size() + 1)/2) + 1 {
+    scoreCount := n.getScoreCount() + 1
+    leastCount := int((n.Peers.Size() + 1)/2) + 1
+    if scoreCount < leastCount {
         n.updateElectionDeadline()
-        glog.Println("election failed: could not reach major of the nodes")
+        //glog.Printf("election failed: could not reach major of the nodes, score count:%d, group size:%d\n", scoreCount, n.Peers.Size() + 1)
         return
     }
 

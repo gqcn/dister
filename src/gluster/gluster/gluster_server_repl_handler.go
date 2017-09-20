@@ -73,6 +73,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
 // 确认写入日志
 func (n *Node) onMsgAppendLogEntry(conn net.Conn, msg *Msg) {
     v := n.UncommittedLogs.Get(msg.Body)
+    //glog.Println("append log entry:", v)
     if v != nil {
         entry := v.(LogEntry)
         n.dmutex.Lock()
@@ -89,6 +90,7 @@ func (n *Node) onMsgUncommittedLogEntry(conn net.Conn, msg *Msg) {
     var entry LogEntry
     result := gMSG_REPL_FAILED
     if n.getLastLogId() == msg.Info.LastLogId && gjson.DecodeTo(msg.Body, &entry) == nil {
+        //glog.Println("uncommitted log entry:", entry.Id)
         n.UncommittedLogs.Set(strconv.FormatInt(entry.Id, 10), entry, 10)
         result = gMSG_REPL_RESPONSE
     }
@@ -278,11 +280,11 @@ func (n *Node) sendAppendLogEntryToPeers(logid int64) {
             try := 0
             for {
                 if n.sendAppendLogEntryToPeer(ip, logid) {
-                    break;
+                    return
                 } else {
                     try++
                     if try == 3 {
-                        break
+                        return
                     }
                 }
             }
@@ -292,18 +294,16 @@ func (n *Node) sendAppendLogEntryToPeers(logid int64) {
 
 // 向节点发送AppendEntry请求
 func (n *Node) sendAppendLogEntryToPeer(ip string, logid int64) bool {
-    result  := false
     tryConn := 0
-    for !result {
+    for {
         conn := n.getConn(ip, gPORT_REPL)
         if conn != nil {
             tryMsg := 0
-            for !result {
-                if n.sendMsg(conn, gMSG_REPL_DATA_APPEND_LOG_ENTRY, strconv.FormatInt(logid, 10)) != nil {
+            for {
+                if n.sendMsg(conn, gMSG_REPL_DATA_APPEND_LOG_ENTRY, strconv.FormatInt(logid, 10)) == nil {
                     msg := n.receiveMsg(conn)
                     if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
-                        result = true
-                        break;
+                        return true
                     }
                 }
                 tryMsg++

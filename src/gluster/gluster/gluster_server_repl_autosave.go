@@ -19,7 +19,7 @@ func (n *Node) autoSavingHandler() {
     lastServiceId := n.getLastServiceLogId()
     for {
         n.saveLogList()
-        n.savePeersToFile()
+        //n.savePeersToFile()
         if n.getLastLogId() != lastLogId {
             n.saveDataToFile()
             lastLogId = n.getLastLogId()
