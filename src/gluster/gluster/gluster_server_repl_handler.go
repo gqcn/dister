@@ -89,6 +89,7 @@ func (n *Node) onMsgAppendLogEntry(conn net.Conn, msg *Msg) {
 func (n *Node) onMsgUncommittedLogEntry(conn net.Conn, msg *Msg) {
     var entry LogEntry
     result := gMSG_REPL_FAILED
+    //glog.Println("uncommitted log entry received:", msg.Body)
     if n.getLastLogId() == msg.Info.LastLogId && gjson.DecodeTo(msg.Body, &entry) == nil {
         //glog.Println("uncommitted log entry:", entry.Id)
         n.UncommittedLogs.Set(strconv.FormatInt(entry.Id, 10), entry, 10)
@@ -366,8 +367,9 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
         if array != nil && len(array) > 0 {
             for _, v := range array {
                 if v.Id > n.getLastLogId() {
-                    n.LogList.PushFront(&v)
-                    n.saveLogEntry(&v)
+                    entry := v
+                    n.LogList.PushFront(&entry)
+                    n.saveLogEntry(&entry)
                 }
             }
         }

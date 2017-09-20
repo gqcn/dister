@@ -37,7 +37,7 @@ func (n *Node) dataReplicationLoop() {
                     conn := n.getConn(ip, gPORT_REPL)
                     if conn != nil {
                         defer conn.Close()
-                        if n.sendMsg(conn, gMSG_REPL_DATA_UPDATE_CHECK, "") != nil {
+                        if n.sendMsg(conn, gMSG_REPL_DATA_UPDATE_CHECK, "") == nil {
                             msg := n.receiveMsg(conn)
                             if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
                                 n.updateDataToRemoteNode(conn, &msg.Info)
