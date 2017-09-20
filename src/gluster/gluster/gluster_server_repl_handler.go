@@ -186,9 +186,8 @@ func (n *Node) onMsgDataUpdateCheck(conn net.Conn, msg *Msg) {
 }
 
 // 发送数据操作到其他节点,为保证数据的一致性和可靠性，只要请求节点及另外1个server节点返回成功后，我们就认为该数据请求成功。
-// 1、保证请求节点的成功是为了让客户端在请求成功之后的下一次(本地请求)请求能优先获取到最新的修改；
-// 2、即使在处理过程中leader挂掉，只要有另外一个server节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个server节点作为leader,这里的机制类似于主从备份的原理；
-// 3、此外，由于采用了异步并发请求的机制，如果集群存在多个其他server节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小；
+// 1、即使在处理过程中leader挂掉，只要有另外一个server节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个server节点作为leader,这里的机制类似于主从备份的原理；
+// 2、此外，由于采用了异步并发请求的机制，如果集群存在多个其他server节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小；
 func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) bool {
     // 只有一个leader节点，并且配置是允许单节点运行
     if n.Peers.Size() < 1 {
