@@ -29,9 +29,9 @@ import (
 )
 
 const (
-    gVERSION                                = "0.8"   // 当前版本
+    gVERSION                                = "1.0"   // 当前版本
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
-    gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容
+    gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
     // 集群端口定义
     gPORT_RAFT                              = 4166    // 集群协议通信接口
