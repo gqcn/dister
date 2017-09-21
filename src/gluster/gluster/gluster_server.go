@@ -75,6 +75,11 @@ func (n *Node) Run() {
     // 初始化节点数据
     n.restoreFromFile()
 
+    // 局域网自动扫描
+    if n.AutoScan {
+        n.sayHiToLocalLan()
+    }
+
     // 显示当前节点信息
     fmt.Printf( "gluster version %s, start running...\n", gVERSION)
     fmt.Println("==================================================================================")
@@ -153,10 +158,10 @@ func (n *Node) initFromCommand() {
         n.setIp(ip)
     }
     // (可选)节点地址IP或者域名
-    scan := gconsole.Option.GetBool("Scan")
-    if scan {
-        n.sayHiToLocalLan()
+    if gconsole.Option.Get("Scan") != "" {
+        n.AutoScan = gconsole.Option.GetBool("Scan")
     }
+
     // (可选)节点地址IP或者域名
     minNode := gconsole.Option.GetInt("MinNode")
     if minNode != 0 {
@@ -192,7 +197,7 @@ func (n *Node) initFromCfg() {
     if j == nil {
         glog.Fatalln("config file decoding failed(surely a json format?), exit")
     }
-    glog.Println("initializing from", cfgpath)
+    //glog.Println("initializing from", cfgpath)
     // 节点名称
     name := j.GetString("Name")
     if name != "" {
@@ -225,10 +230,9 @@ func (n *Node) initFromCfg() {
     if ip != "" {
         n.setIp(ip)
     }
-    // (可选)本地局域网搜索
-    scan := j.GetBool("Scan")
-    if scan {
-        n.sayHiToLocalLan()
+    // (可选)本地局域网搜索，默认情况下是开启，当有设置的时候使用设置值
+    if j.Get("Scan") != nil {
+        n.AutoScan = j.GetBool("Scan")
     }
     // (可选)节点地址IP或者域名
     minNode := j.GetInt("MinNode")
@@ -382,22 +386,20 @@ func (n *Node) sayHi(ip string) bool {
 
 // 向局域网内其他主机通知上线
 func (n *Node) sayHiToLocalLan() {
-    ip      := n.getIp()
-    segment := gip.GetSegment(ip)
-    if segment == "" || !gip.IsIntranet(ip){
-        glog.Fatalln("invalid listening ip given")
+    ips, err := gip.IntranetIP()
+    if err != nil {
+        glog.Error(err)
         return
     }
-    if segment == "127.0.0" {
-        glog.Error("there're multiple ip addresses in this host, bind one to make scan work, exit scanning")
-        return
-    }
-    for i := 1; i < 256; i++ {
-        go func(ip string) {
-            if n.sayHi(ip) {
-                glog.Println("successfully scan and add local ip:", ip)
-            }
-        }(fmt.Sprintf("%s.%d", segment, i))
+    for _, v := range ips {
+        segment := gip.GetSegment(v)
+        for i := 1; i < 256; i++ {
+            go func(ip string) {
+                if n.sayHi(ip) {
+                    glog.Println("successfully scan and add local ip:", ip)
+                }
+            }(fmt.Sprintf("%s.%d", segment, i))
+        }
     }
 }
 

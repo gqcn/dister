@@ -11,6 +11,26 @@ import (
     "strconv"
 )
 
+// 显示帮助信息
+func cmd_help () {
+    //fmt.Printf("gluster version %s\n", gVERSION)
+    fmt.Printf("Version  : %s\n", gVERSION)
+    fmt.Printf("Usage    : gluster [command] [option]\n")
+    fmt.Printf("Commands : \n")
+    fmt.Printf("    ?,help                      : this help\n")
+    fmt.Printf("    nodes                       : show all nodes of this group\n")
+    fmt.Printf("    kvs                         : show all key-value sets\n")
+    fmt.Printf("    services                    : show all services\n")
+    fmt.Printf("    addnode    IP/DOMAIN        : add ip/domain to this group\n")
+    fmt.Printf("    delnode    IP/DOMAIN,...    : remove ip/domain from this group, multiple ips/domains seperated by ','\n")
+    fmt.Printf("    addkv      KEY VALUE        : add key-value set to this group\n")
+    fmt.Printf("    delkv      KEY,...          : remove keys from this group, multiple keys seperated by ','\n")
+    fmt.Printf("    addservice CONFIG           : add service to this group, CONFIG specifies the service config file path\n")
+    fmt.Printf("    delservice SERVICE_NAME,... : remove service from this group, multiple service names seperated by ','\n")
+    fmt.Printf("\n")
+}
+
+
 // 查看集群节点
 // 使用方式：gluster nodes
 func cmd_nodes () {
@@ -125,7 +145,7 @@ func cmd_kvs () {
         lenstr := strconv.Itoa(length)
         format1 := "%-" + lenstr + "s : %s\n"
         format2 := "%-" + lenstr + "s : %.100s\n"
-        fmt.Printf(format1, "KEY", "VALUE")
+        fmt.Printf(format1, "K", "V")
         for k, v := range m {
             fmt.Printf(format2, k, v)
         }

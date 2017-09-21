@@ -109,24 +109,25 @@ type Msg struct {
 
 // 服务器节点信息
 type Node struct {
-    mutex               sync.RWMutex             // 通用锁，可以使用不同的锁来控制对应变量以提高读写效率
-    dmutex              sync.RWMutex             // DataMap锁，用以保证KV请求的先进先出队列执行
+    mutex                sync.RWMutex             // 通用锁，可以使用不同的锁来控制对应变量以提高读写效率
+    dmutex               sync.RWMutex             // DataMap锁，用以保证KV请求的先进先出队列执行
 
-    Group               string                   // 集群名称
-    Id                  string                   // 节点ID(根据算法自动生成的集群唯一名称)
-    Name                string                   // 节点主机名称
-    Ip                  string                   // 主机节点的ip，由通信的时候进行填充，
+    Group                string                   // 集群名称
+    Id                   string                   // 节点ID(根据算法自动生成的集群唯一名称)
+    Name                 string                   // 节点主机名称
+    Ip                   string                   // 主机节点的ip，由通信的时候进行填充，
                                                  // 一个节点可能会有多个IP，这里保存最近通信的那个，节点唯一性识别使用的是Name字段
-    CfgFilePath         string                   // 配置文件绝对路径
-    CfgReplicated       bool                     // 本地配置对象是否已同步到leader(配置同步需要注意覆盖问题)
-    Peers               *gmap.StringInterfaceMap // 集群所有的节点信息(ip->节点信息)，不包含自身
-    Role                int                      // 集群角色
-    RaftRole            int                      // RAFT角色
-    Leader              *NodeInfo                // Leader节点信息
-    MinNode             int                      // 最小节点数
-    Score               int64                    // 选举比分
-    ScoreCount          int                      // 选举比分的节点数
-    ElectionDeadline    int64                    // 选举超时时间点
+    CfgFilePath          string                   // 配置文件绝对路径
+    CfgReplicated        bool                     // 本地配置对象是否已同步到leader(配置同步需要注意覆盖问题)
+    Peers                *gmap.StringInterfaceMap // 集群所有的节点信息(ip->节点信息)，不包含自身
+    Role                 int                      // 集群角色
+    RaftRole             int                      // RAFT角色
+    Leader               *NodeInfo                // Leader节点信息
+    MinNode              int                      // 最小节点数
+    Score                int64                    // 选举比分
+    ScoreCount           int                      // 选举比分的节点数
+    ElectionDeadline     int64                    // 选举超时时间点
+    AutoScan             bool                     // 启动时自动扫描局域网，添加gluster节点
 
     LogIdIndex           int64                    // 用于生成LogId的参考字段
     LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
@@ -222,6 +223,7 @@ func NewServer() *Node {
         RaftRole            : gROLE_RAFT_FOLLOWER,
         Leader              : nil,
         MinNode             : 2,
+        AutoScan            : true,
         Peers               : gmap.NewStringInterfaceMap(),
         SavePath            : gfile.SelfDir(),
         LogList             : glist.NewSafeList(),
@@ -246,6 +248,8 @@ func NewServer() *Node {
     gconsole.BindHandle("addservice", cmd_addservice)
     gconsole.BindHandle("delservice", cmd_delservice)
     gconsole.BindHandle("balance",    cmd_balance)
+    gconsole.BindHandle("help",       cmd_help)
+    gconsole.BindHandle("?",          cmd_help)
 
     return &node
 }
