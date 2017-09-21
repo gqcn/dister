@@ -11,15 +11,21 @@ gluster的灵感来源于ZooKeeper及Consul，它们都实现了类似的分布�
 
 ### gluster的特点
 
+1. 开源、免费、跨平台；
 1. 使用RAFT算法实现分布式一致性；
-2. 使用通用的REST协议提供API操作；
-3. 使用分布式KV键值存储实现服务的配置管理；
-4. 超高读写性能，适合各种高并发的应用场景；
-5. 支持集群分组，不同的集群之间数据相互隔离；
-6. 配置管理简单，且仅提供实用的API接口以及终端管理命令，轻量级、低成本、易维护；
+1. 使用通用的REST协议提供API操作；
+1. 使用分布式KV键值存储实现服务的配置管理；
+1. 超高读写性能，适合各种高并发的应用场景；
+1. 支持集群分组，不同的集群之间数据相互隔离；
+1. 配置管理简单，且仅提供实用的API接口以及终端管理命令，轻量级、低成本、易维护；
 
 
 官方网站：http://johng.cn/gluster
+
+相关文档：
+1. [gluster的介绍及设计](http://johng.cn/gluster-brief/)
+2. [gluster的安装及使用](http://johng.cn/gluster-installation-and-usage/)
+3. [gluster的使用示例](http://johng.cn/gluster-example/)
 
 
 
