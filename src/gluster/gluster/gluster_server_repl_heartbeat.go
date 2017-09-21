@@ -10,6 +10,9 @@ import (
     "os"
     "bufio"
     "encoding/json"
+    "g/os/glog"
+    "fmt"
+    "g/os/gcache"
 )
 
 // leader到其他节点的数据同步监听
@@ -57,16 +60,25 @@ func (n *Node) serviceReplicationLoop() {
         if n.getRaftRole() == gROLE_RAFT_LEADER {
             for _, v := range n.Peers.Values() {
                 info := v.(NodeInfo)
+                //glog.Printf("%v: %v <= %v\n", info.Ip, n.getLastServiceLogId(), info.LastServiceLogId)
                 if info.Status != gSTATUS_ALIVE || n.getLastServiceLogId() <= info.LastServiceLogId {
                     continue
                 }
-                go func(ip string) {
-                    conn := n.getConn(ip, gPORT_REPL)
+                go func(info *NodeInfo) {
+                    key  := fmt.Sprintf("gluster_service_replication_%s", info.Id)
+                    if gcache.Get(key) != nil {
+                        return
+                    }
+                    gcache.Set(key, 1, 10000)
+                    defer gcache.Remove(key)
+
+                    conn := n.getConn(info.Ip, gPORT_REPL)
                     if conn != nil {
                         defer conn.Close()
+                        glog.Println("send service replication from", n.getName(), "to", info.Name)
                         n.updateServiceToRemoteNode(conn)
                     }
-                }(info.Ip)
+                }(&info)
             }
         }
         time.Sleep(gLOG_REPL_SERVICE_UPDATE_INTERVAL * time.Millisecond)

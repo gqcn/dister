@@ -30,7 +30,6 @@ func cmd_help () {
     fmt.Printf("\n")
 }
 
-
 // 查看集群节点
 // 使用方式：gluster nodes
 func cmd_nodes () {

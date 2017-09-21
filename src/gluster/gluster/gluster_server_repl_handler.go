@@ -13,6 +13,7 @@ import (
     "time"
     "fmt"
     "strconv"
+    "g/core/types/gset"
 )
 
 // 集群数据同步接口回调函数
@@ -130,11 +131,21 @@ func (n *Node) onMsgPeersUpdate(conn net.Conn, msg *Msg) {
     id := n.getId()
     ip := n.getIp()
     if gjson.DecodeTo(msg.Body, &m) == nil {
+        set := gset.NewStringSet()
+        // 添加节点
         for _, v := range m {
+            set.Add(v.Id)
             if v.Id != id {
                 n.updatePeerInfo(v)
             } else if v.Ip != ip {
                 n.setIp(v.Ip)
+            }
+        }
+        // 删除leader不存在的节点
+        for _, v := range n.Peers.Values() {
+            info := v.(NodeInfo)
+            if !set.Contains(info.Id) {
+                n.Peers.Remove(info.Id)
             }
         }
     }
@@ -151,7 +162,7 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
     list := make([]string, 0)
     if gjson.DecodeTo(msg.Body, &list) == nil {
         if n.removeServiceByNames(list) {
-            n.setLastServiceLogId(gtime.Microsecond())
+            n.setLastServiceLogId(gtime.Millisecond())
         }
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
@@ -166,7 +177,8 @@ func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
             key := n.getServiceKeyByNameAndIndex(sc.Name, k)
             n.Service.Set(key, Service{ sc.Type, v })
         }
-        n.setLastServiceLogId(gtime.Microsecond())
+        // 新写入的服务不做同步，等待服务健康检查后再做同步
+        // n.setLastServiceLogId(gtime.Millisecond())
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
@@ -414,6 +426,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
 // 从目标节点同步Service数据
 // follower<-leader
 func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
+    glog.Println("receive service replication from", msg.Info.Name)
     defer conn.Close()
     m   := make(map[string]Service)
     err := gjson.DecodeTo(msg.Body, &m)
@@ -432,10 +445,46 @@ func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
 // 同步Service到目标节点
 // leader->follower
 func (n *Node) updateServiceToRemoteNode(conn net.Conn) {
-    defer conn.Close()
-    if err := n.sendMsg(conn, gMSG_REPL_SERVICE_COMPLETELY_UPDATE, gjson.Encode(n.Service)); err != nil {
+    serviceJson := gjson.Encode(*n.Service.Clone())
+    if err := n.sendMsg(conn, gMSG_REPL_SERVICE_COMPLETELY_UPDATE, serviceJson); err != nil {
         glog.Error(err)
         return
     }
+}
+
+// 新增节点,通过IP添加
+func (n *Node) onMsgApiPeersAdd(conn net.Conn, msg *Msg) {
+    list := make([]string, 0)
+    gjson.DecodeTo(msg.Body, &list)
+    if list != nil && len(list) > 0 {
+        for _, ip := range list {
+            if n.Peers.Contains(ip) {
+                continue
+            }
+            glog.Printf("adding peer: %s\n", ip)
+            n.updatePeerInfo(NodeInfo{Id: ip, Ip: ip})
+        }
+    }
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+}
+
+// 删除节点，目前通过IP删除，效率较低
+func (n *Node) onMsgApiPeersRemove(conn net.Conn, msg *Msg) {
+    list := make([]string, 0)
+    gjson.DecodeTo(msg.Body, &list)
+    if list != nil && len(list) > 0 {
+        peers := n.Peers.Values()
+        for _, ip := range list {
+            for _, v := range peers {
+                info := v.(NodeInfo)
+                if ip == info.Ip {
+                    glog.Printf("removing peer: %s, ip: %s\n", info.Name, info.Ip)
+                    n.Peers.Remove(info.Id)
+                    break;
+                }
+            }
+        }
+    }
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
 

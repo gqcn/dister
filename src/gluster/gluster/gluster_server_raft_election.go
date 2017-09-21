@@ -11,7 +11,6 @@ import (
 // 改进：
 // 3个节点以内的集群也可以完成leader选举
 func (n *Node) electionHandler() {
-    n.updateElectionDeadline()
     for {
         if n.Role == gROLE_SERVER && n.getRaftRole() != gROLE_RAFT_LEADER && gtime.Millisecond() >= n.getElectionDeadline() {
             // 使用MinNode变量控制最小节点数(这里判断的时候要去除自身的数量)
@@ -134,17 +133,17 @@ func (n *Node) beginScore() {
                 }
                 switch msg.Head {
                     case gMSG_RAFT_I_AM_LEADER:
-                        glog.Println("score comparison: get leader from", info.Name)
-                        n.setLeader(info)
+                        glog.Println("score comparison: get leader from", msg.Info.Name)
+                        n.setLeader(&msg.Info)
                         n.setRaftRole(gROLE_RAFT_FOLLOWER)
 
                     case gMSG_RAFT_SCORE_COMPARE_FAILURE:
-                        glog.Println("score comparison: get failure from", info.Name)
-                        n.setLeader(info)
+                        glog.Println("score comparison: get failure from", msg.Info.Name)
+                        n.setLeader(&msg.Info)
                         n.setRaftRole(gROLE_RAFT_FOLLOWER)
 
                     case gMSG_RAFT_SCORE_COMPARE_SUCCESS:
-                        glog.Println("score comparison: get success from", info.Name)
+                        glog.Println("score comparison: get success from", msg.Info.Name)
                 }
             }
         }(&info)

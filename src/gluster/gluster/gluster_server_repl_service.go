@@ -153,7 +153,7 @@ func (n *Node) checkServiceHealth(skey string, node Service) {
     if fmt.Sprintf("%v", ostatus) != fmt.Sprintf("%v", nstatus) {
         n.Service.Set(skey, node)
         n.setLastServiceLogId(gtime.Millisecond())
-        //glog.Printf("service updated, node: %s, from %v to %v\n", skey, ostatus, nstatus)
+        glog.Printf("service updated, node: %s, from %v to %v\n", skey, ostatus, nstatus)
     }
 
     timeout     := int64(gSERVICE_HEALTH_CHECK_INTERVAL)

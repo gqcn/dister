@@ -623,7 +623,6 @@ func (n *Node) setRole(role int) {
     n.mutex.Lock()
     n.Role = role
     n.mutex.Unlock()
-
 }
 
 func (n *Node) setRaftRole(role int) {
@@ -637,18 +636,19 @@ func (n *Node) setRaftRole(role int) {
 }
 
 func (n *Node) setLeader(info *NodeInfo) {
-    n.mutex.Lock()
-    defer n.mutex.Unlock()
-    if n.Leader != nil {
-        if n.Leader.Id == info.Id {
+    leader := n.getLeader()
+    if leader != nil {
+        if leader.Id == info.Id {
             return
         } else {
-            glog.Printf("leader changed from %s to %s\n", n.Leader.Name, info.Name)
+            glog.Printf("leader changed from %s to %s\n", leader.Name, info.Name)
         }
     } else {
         glog.Println("set leader:", info.Name)
     }
+    n.mutex.Lock()
     n.Leader = info
+    n.mutex.Unlock()
 }
 
 // 设置数据保存目录路径
