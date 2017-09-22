@@ -20,19 +20,16 @@ import (
     "g/util/grand"
 )
 
-// 获取数据
-func (n *Node) receive(conn net.Conn) []byte {
-    return Receive(conn)
-}
-
 // 获取Msg
 func (n *Node) receiveMsg(conn net.Conn) *Msg {
+    conn.SetReadDeadline(time.Now().Add(gTCP_READ_TIMEOUT * time.Millisecond))
     return RecieveMsg(conn)
 }
 
-// 发送数据
-func (n *Node) send(conn net.Conn, data []byte) error {
-    return Send(conn, data)
+// 获取Msg，自定义超时时间
+func (n *Node) receiveMsgWithTimeout(conn net.Conn, timeout time.Duration) *Msg {
+    conn.SetReadDeadline(time.Now().Add(timeout))
+    return RecieveMsg(conn)
 }
 
 // 发送Msg
@@ -45,7 +42,7 @@ func (n *Node) sendMsg(conn net.Conn, head int, body string) error {
         glog.Error("send msg parse err:", err)
         return err
     }
-    return n.send(conn, s)
+    return Send(conn, s)
 }
 
 // 获得TCP链接
@@ -75,21 +72,18 @@ func (n *Node) Run() {
     // 初始化节点数据
     n.restoreFromFile()
 
-    // 局域网自动扫描
-    if n.AutoScan {
-        n.sayHiToLocalLan()
-    }
-
     // 显示当前节点信息
     fmt.Printf( "gluster version %s, start running...\n", gVERSION)
     fmt.Println("==================================================================================")
-    fmt.Println("Host Id       :", n.Id)
-    fmt.Println("Host Role     :", roleName(n.Role))
-    fmt.Println("Host Name     :", n.Name)
-    fmt.Println("Host Group    :", n.Group)
-    fmt.Println("Host LogPath  :", glog.GetLogPath())
-    fmt.Println("Host SavePath :", n.getSavePath())
-    fmt.Println("Group MinNode :", n.MinNode)
+    fmt.Println("Host Id         :", n.Id)
+    fmt.Println("Host Role       :", roleName(n.Role))
+    fmt.Println("Host Name       :", n.Name)
+    fmt.Println("Host Group      :", n.Group)
+    fmt.Println("Host LogPath    :", glog.GetLogPath())
+    fmt.Println("Host SavePath   :", n.getSavePath())
+    fmt.Println("Host MinNode    :", n.MinNode)
+    fmt.Println("Last Log Id     :", n.getLastLogId())
+    fmt.Println("Last Service Id :", n.getLastServiceLogId())
     fmt.Println("==================================================================================")
 
     // 创建接口监听
@@ -105,9 +99,6 @@ func (n *Node) Run() {
         api.Run()
     }()
 
-    // 通知上线（这里采用局域网扫描的方式进行广播通知）
-    //go n.sayHiToAll()
-    //time.Sleep(2 * time.Second)
     // 配置同步
     go n.replicateConfigToLeader()
     // 选举超时检查
@@ -120,6 +111,11 @@ func (n *Node) Run() {
     go n.autoSavingHandler()
     // 服务健康检查
     go n.serviceHealthCheckHandler()
+
+    // 所有线程启动完成后，局域网自动扫描
+    if n.AutoScan {
+        n.sayHiToLocalLan()
+    }
 }
 
 // 从命令行读取配置文件内容

@@ -14,6 +14,7 @@ import (
     "fmt"
     "strconv"
     "g/core/types/gset"
+    "g/os/gcache"
 )
 
 // 集群数据同步接口回调函数
@@ -59,11 +60,13 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
             // 先保存日志，当节点同步成功后才真实写入数据
             // 不用做重复性验证，即使失败了，客户端也需要做重试请求
             // 失败情况下日志只会不断追加，但并不会影响最终的数据结果
-            if n.sendUncommittedLogEntryToPeers(entry, msg.Info.Id) {
+            if n.sendUncommittedLogEntryToPeers(entry) {
                 go n.sendAppendLogEntryToPeers(entry.Id)
                 n.LogList.PushFront(&entry)
                 n.saveLogEntry(&entry)
                 result = gMSG_REPL_RESPONSE
+            } else {
+                glog.Error("adding data failed:", entry)
             }
             n.dmutex.Unlock()
         }
@@ -71,30 +74,34 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     n.sendMsg(conn, result, "")
 }
 
-// 确认写入日志
+// 确认写入日志，标识数据项可以被自动化队列处理
 func (n *Node) onMsgAppendLogEntry(conn net.Conn, msg *Msg) {
-    v := n.UncommittedLogs.Get(msg.Body)
-    //glog.Println("append log entry:", v)
-    if v != nil {
-        entry := v.(LogEntry)
-        n.dmutex.Lock()
-        n.LogList.PushFront(&entry)
-        n.saveLogEntry(&entry)
-        n.dmutex.Unlock()
-        n.UncommittedLogs.Remove(msg.Body)
-    }
+    gcache.Set(n.getCommittedCacheKeyByLogId(msg.Body), 1, 60000)
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
 
-// 新增数据日志
+// 新增数据日志，提交到队列进行处理
 func (n *Node) onMsgUncommittedLogEntry(conn net.Conn, msg *Msg) {
     var entry LogEntry
     result := gMSG_REPL_FAILED
-    //glog.Println("uncommitted log entry received:", msg.Body)
-    if n.getLastLogId() == msg.Info.LastLogId && gjson.DecodeTo(msg.Body, &entry) == nil {
-        //glog.Println("uncommitted log entry:", entry.Id)
-        n.UncommittedLogs.Set(strconv.FormatInt(entry.Id, 10), entry, 10)
+    if gjson.DecodeTo(msg.Body, &entry) == nil {
+        n.dmutex.Lock()
+        p := n.UncommittedLogList.Front()
+        if p != nil {
+            for p != nil {
+                if entry.Id > p.Value.(*LogEntry).Id {
+                    //glog.Printf("insert log id %d before %d\n", entry.Id, p.Value.(*LogEntry).Id)
+                    n.UncommittedLogList.InsertBefore(&entry, p)
+                    break;
+                } else {
+                    p = p.Next()
+                }
+            }
+        } else {
+            n.UncommittedLogList.PushFront(&entry)
+        }
         result = gMSG_REPL_RESPONSE
+        n.dmutex.Unlock()
     }
     n.sendMsg(conn, result, "")
 }
@@ -191,8 +198,10 @@ func (n *Node) onMsgReplDataRemove(conn net.Conn, msg *Msg) {
 // Data是否需要同步检测
 func (n *Node) onMsgDataUpdateCheck(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_FAILED
-    if n.getLastLogId() < msg.Info.LastLogId && n.UncommittedLogs.Size() == 0 {
+    //glog.Printf("checking update: %d, %d, %d\n", n.getLastLogId(), msg.Info.LastLogId, n.UncommittedLogs.Size())
+    if n.getLastLogId() < msg.Info.LastLogId && n.UncommittedLogList.Len() == 0 {
         result = gMSG_REPL_RESPONSE
+        //glog.Println("yes, I need data update")
     }
     n.sendMsg(conn, result, "")
 }
@@ -200,7 +209,7 @@ func (n *Node) onMsgDataUpdateCheck(conn net.Conn, msg *Msg) {
 // 发送数据操作到其他节点,为保证数据的一致性和可靠性，只要请求节点及另外1个server节点返回成功后，我们就认为该数据请求成功。
 // 1、即使在处理过程中leader挂掉，只要有另外一个server节点有最新的请求数据，那么就算重新进行选举，也会选举到数据最新的那个server节点作为leader,这里的机制类似于主从备份的原理；
 // 2、此外，由于采用了异步并发请求的机制，如果集群存在多个其他server节点，出现仅有一个节点成功的概念很小，出现所有节点都失败的概率更小；
-func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) bool {
+func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry) bool {
     // 只有一个leader节点，并且配置是允许单节点运行
     if n.Peers.Size() < 1 {
         if n.getRaftRole() == gROLE_RAFT_LEADER && n.getMinNode() == 1 {
@@ -210,16 +219,11 @@ func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) b
         }
     }
 
-    var clientok    int32 = 0 // 是否完成请求节点请求成功
     var serverok    int32 = 0 // 是否完成1个server请求成功
     var failCount   int32 = 0 // 失败请求数
     var doneCount   int32 = 0 // 成功请求数
     var aliveCount  int32 = 0 // 活跃的节点数/总共发送的请求 = 失败请求数 + 成功请求数
     var serverCount int32 = 0 // 集群中的Server节点数量
-    // 如果本地就是leader
-    if clientId == n.getId() {
-        clientok = 1
-    }
     result := true
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
@@ -240,9 +244,6 @@ func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) b
             if n.sendMsg(conn, gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY, gjson.Encode(*entry)) == nil {
                 msg := n.receiveMsg(conn)
                 if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
-                    if msg.Info.Id == clientId {
-                        atomic.AddInt32(&clientok, 1)
-                    }
                     if msg.Info.Role == gROLE_SERVER {
                         atomic.AddInt32(&serverok, 1)
                     }
@@ -256,7 +257,7 @@ func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) b
     // 等待执行结束，超时时间60秒
     timeout := gtime.Second() + 60
     for aliveCount > 0 && serverCount > 0 {
-        if atomic.LoadInt32(&clientok) > 0 && atomic.LoadInt32(&serverok) > 0 {
+        if atomic.LoadInt32(&serverok) > 0 {
             result = true
             break;
         }
@@ -275,7 +276,7 @@ func (n *Node) sendUncommittedLogEntryToPeers(entry LogEntry, clientId string) b
         if gtime.Second() >= timeout {
             break;
         }
-        time.Sleep(time.Millisecond)
+        time.Sleep(100* time.Microsecond)
     }
 
     return result
@@ -336,19 +337,12 @@ func (n *Node) sendAppendLogEntryToPeer(ip string, logid int64) bool {
     return false
 }
 
-// 数据同步，更新本地数据
-func (n *Node) onMsgReplUpdate(conn net.Conn, msg *Msg) {
-    glog.Println("receive data replication update from:", msg.Info.Name)
-    n.updateDataFromRemoteNode(conn, msg)
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
-}
-
 // 保存日志数据
 func (n *Node) saveLogEntry(entry *LogEntry) {
     lastLogId := n.getLastLogId()
     if entry.Id < lastLogId {
-        glog.Warning(fmt.Sprintf("expired log entry, received:%v, current:%v\n", entry.Id, lastLogId))
-        return
+        // 在高并发下，有可能会出现这种情况，提出警告
+        glog.Warning(fmt.Sprintf("expired log entry, received:%d, current:%d", entry.Id, lastLogId))
     }
     switch entry.Act {
         case gMSG_REPL_DATA_SET:
@@ -365,6 +359,13 @@ func (n *Node) saveLogEntry(entry *LogEntry) {
     n.setLastLogId(entry.Id)
 }
 
+
+// 数据同步，更新本地数据
+func (n *Node) onMsgReplUpdate(conn net.Conn, msg *Msg) {
+    n.updateDataFromRemoteNode(conn, msg)
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+}
+
 // 从目标节点同步数据，采用增量模式
 // follower<-leader
 func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
@@ -375,7 +376,9 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
             glog.Error(err)
             return
         }
-        if array != nil && len(array) > 0 {
+        length := len(array)
+        glog.Printf("receive data replication update from: %s, start logid: %d, end logid: %d, size: %d\n", msg.Info.Name, array[0].Id, array[len(array)-1].Id, length)
+        if array != nil && length > 0 {
             for _, v := range array {
                 if v.Id > n.getLastLogId() {
                     entry := v
@@ -390,21 +393,30 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
 // 同步数据到目标节点，采用增量模式
 // leader->follower
 func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
+    // 判断是否正在执行更新操作
+    key := fmt.Sprintf("data_updating_to_node_%s", info.Id)
+    if gcache.Get(key) != nil {
+        return
+    }
+    gcache.Set(key, 1, 36000000)
+    defer gcache.Remove(key)
     // 支持分批同步，如果数据量大，每一次增量同步大小不超过1万条
     logid := info.LastLogId
     if n.getLastLogId() > info.LastLogId {
         if logid == 0 || (logid != 0 && n.isValidLogId(logid)) {
-            glog.Println("start data incremental replication from", n.getName(), "to", info.Name)
+            //glog.Println("start data incremental replication from", n.getName(), "to", info.Name)
             for {
+                // 每批次的数据量要考虑到目标节点写入的时间会不会超过TCP读取等待超时时间
                 list    := n.getLogEntriesByLastLogId(logid, 10000)
                 length  := len(list)
                 if length > 0 {
-                    glog.Println("data incremental replication start logid:", list[0].Id, ", end logid:", list[length-1].Id)
+                    glog.Printf("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d\n",
+                        n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
                     if err := n.sendMsg(conn, gMSG_REPL_DATA_INCREMENTAL_UPDATE, gjson.Encode(list)); err != nil {
                         glog.Error(err)
                         return
                     }
-                    if rmsg := n.receiveMsg(conn); rmsg != nil {
+                    if rmsg := n.receiveMsgWithTimeout(conn, 10*time.Second); rmsg != nil {
                         logid = rmsg.Info.LastLogId
                         if n.getLastLogId() == logid {
                             break;
@@ -413,12 +425,12 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
                         break
                     }
                 } else {
-                    glog.Println("data incremental replication failed, logid:", logid)
+                    glog.Printf("data incremental replication failed, logid: %d, current: %d\n", logid, n.getLastLogId())
                     break
                 }
             }
         } else {
-            glog.Println("failed in data replication from", n.getName(), "to", info.Name, ", invalid log id:", logid)
+            glog.Printf("failed in data replication from %s to %s, invalid log id: %d, current: %d\n", n.getName(), info.Name, logid, n.getLastLogId())
         }
     }
 }

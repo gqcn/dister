@@ -25,13 +25,12 @@ import (
     "g/encoding/gmd5"
     "g/encoding/gcompress"
     "g/os/gconsole"
-    "g/os/gcache"
 )
 
 const (
     gVERSION                                = "1.0"   // 当前版本
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
-    gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
+    gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
     // 集群端口定义
     gPORT_RAFT                              = 4166    // 集群协议通信接口
@@ -62,7 +61,7 @@ const (
     gELECTION_TIMEOUT_HEARTBEAT             = 1000    // (毫秒)RAFT Leader统治维持心跳间隔
     gLOG_REPL_DATA_UPDATE_INTERVAL          = 2000    // (毫秒)数据同步检测心跳间隔
     gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 2000    // (毫秒)Service同步检测心跳间隔
-    gLOG_REPL_AUTOSAVE_INTERVAL             = 2000    // (毫秒)数据自动物理化保存的间隔
+    gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔
     gLOG_REPL_PEERS_INTERVAL                = 2000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL          = 2000    // (毫秒)健康检查默认间隔
 
@@ -133,7 +132,7 @@ type Node struct {
     LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
     LastServiceLogId     int64                    // 最后一次保存的service id号，用以识别service信息同步
     LogList              *glist.SafeList          // leader日志列表，用以数据同步
-    UncommittedLogs      *gcache.Cache            // uncommitted log entry缓存对象
+    UncommittedLogList   *glist.SafeList          // uncommitted log entry列表
     SavePath             string                   // 物理存储的本地数据*目录*绝对路径
     Service              *gmap.StringInterfaceMap // 存储的服务配置表
     DataMap              *gmap.StringStringMap    // 存储的K-V哈希表
@@ -227,7 +226,7 @@ func NewServer() *Node {
         Peers               : gmap.NewStringInterfaceMap(),
         SavePath            : gfile.SelfDir(),
         LogList             : glist.NewSafeList(),
-        UncommittedLogs     : gcache.New(),
+        UncommittedLogList  : glist.NewSafeList(),
         Service             : gmap.NewStringInterfaceMap(),
         DataMap             : gmap.NewStringStringMap(),
     }
@@ -257,7 +256,7 @@ func NewServer() *Node {
 // 生成节点的唯一ID(md5(第一张网卡的mac地址))
 // @todo 可以考虑有无更好的方式标识一个节点的唯一性
 func nodeId() string {
-    interfaces, err :=  net.Interfaces()
+    interfaces, err := net.Interfaces()
     if err != nil {
         glog.Fatalln("getting local MAC address failed:", err)
     }
@@ -277,7 +276,6 @@ func nodeId() string {
 
 // 获取数据
 func Receive(conn net.Conn) []byte {
-    conn.SetReadDeadline(time.Now().Add(gTCP_READ_TIMEOUT * time.Millisecond))
     retry      := 0
     buffersize := 1024
     data       := make([]byte, 0)

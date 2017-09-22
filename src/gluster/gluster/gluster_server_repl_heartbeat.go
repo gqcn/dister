@@ -13,10 +13,16 @@ import (
     "g/os/glog"
     "fmt"
     "g/os/gcache"
+    "io"
+    "strconv"
+    "g/util/gtime"
 )
 
 // leader到其他节点的数据同步监听
 func (n *Node) replicationHandler() {
+    // 未提交的数据日志自动化处理
+    go n.uncommittedLogsLoop()
+
     // 数据同步检测
     go n.dataReplicationLoop()
 
@@ -25,6 +31,56 @@ func (n *Node) replicationHandler() {
 
     // Peers同步检测
     go n.peersReplicationLoop()
+}
+
+// 根据logid获取缓存的键名
+func (n *Node) getCommittedCacheKeyByLogId(logidstr string) string {
+    return fmt.Sprintf("committed_log_id_%s", logidstr)
+}
+
+// 未提交的数据日志自动化处理
+// 由于是单线程处理，这里甚至不需要锁
+// 由于请求是异步的，这里需要对日志进行重排序
+func (n *Node) uncommittedLogsLoop() {
+    for {
+        p := n.UncommittedLogList.Back()
+        for p != nil {
+            entry  := p.Value.(*LogEntry)
+            t      := p.Prev()
+            key    := n.getCommittedCacheKeyByLogId(strconv.FormatInt(entry.Id, 10))
+            if gcache.Get(key) != nil {
+                if entry.Id > n.getLastLogId() {
+                    //glog.Println("saving log id:", entry.Id)
+                    n.LogList.PushFront(entry)
+                    n.saveLogEntry(entry)
+                    gcache.Remove(key)
+                } else {
+                    //glog.Printf("failed to save log id: %d, less than %d\n", entry.Id, n.getLastLogId())
+                }
+                n.UncommittedLogList.Remove(p)
+            } else {
+                //glog.Printf("log id: %d, not append log entry\n", entry.Id)
+                k := fmt.Sprintf("committed_log_id_not_found_%d", entry.Id)
+                r := gcache.Get(k)
+                if r != nil {
+                    // 该数据日志超过2秒仍未处理，那么就废弃掉，继续处理后面的数据
+                    // 否则，继续等待该数据项被处理，因此，这里一条失败的数据容易造成数据写入堵塞
+                    if gtime.Second() - r.(int64) > 2 {
+                        glog.Println("expired uncommitted log id:", entry.Id)
+                        gcache.Remove(k)
+                        n.UncommittedLogList.Remove(p)
+                    } else {
+                        break;
+                    }
+                } else {
+                    gcache.Set(key, gtime.Second(), 10000)
+                    break;
+                }
+            }
+            p = t
+        }
+        time.Sleep(100 * time.Millisecond)
+    }
 }
 
 // 日志自动同步检查
@@ -127,34 +183,35 @@ func (n *Node) getMinLogIdFromPeers() int64 {
 // 如果出现leader的logid比follower大，并且获取不到更新的日志列表时，表示两者数据已经不一致，需要做完整的同步复制处理
 // 升序查找
 func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
+    array := make([]LogEntry, 0)
     if n.getLastLogId() > id {
-        array := make([]LogEntry, 0)
-        // 首先从内存中获取
+        // 首先从内存中获取，需要注意的是，
+        // 如果内存列表中最小的logid比请求的大，数据会有缺失，必须从磁盘中读取
+        // 因此，内容列表中的logid必须包含请求的logid
         if n.LogList.Len() > 0 {
-            //n.LogList.RLock()
             match := false
             if id == 0 {
                 match = true
             }
             l := n.LogList.Back()
-            for l != nil {
-                // 最大获取条数控制
-                if len(array) == max {
-                    break;
-                }
-                r := l.Value.(*LogEntry)
-                if r.Id > id {
-                    match = true
-                } else if r.Id > id {
-                    if match {
-                        array = append(array, *r)
-                    } else {
+            if l != nil && l.Value.(*LogEntry).Id <= id {
+                for l != nil {
+                    if len(array) == max {
                         break;
                     }
+                    r := l.Value.(*LogEntry)
+                    if r.Id <= id {
+                        match = true
+                    } else {
+                        if match {
+                            array = append(array, *r)
+                        } else {
+                            break;
+                        }
+                    }
+                    l = l.Prev()
                 }
-                l = l.Prev()
             }
-            //n.LogList.RUnlock()
         }
         // 如果当前内存中的数据不够，那么从文件中读取剩余数据
         length := len(array)
@@ -172,6 +229,7 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
 
 // 从文件中获取指定logid之后max数量的数据
 func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
+    // id仅用于计算文件路径
     id    := logid
     match := false
     if logid == 0 {
@@ -179,19 +237,27 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
     }
     array := make([]LogEntry, 0)
     for {
+        // 确定数据文件
         path      := n.getLogEntryFileSavePathById(id)
         file, err := gfile.OpenWithFlag(path, os.O_RDONLY)
         if err == nil {
             defer file.Close()
+            // 读取数据文件符合条件的数据
             buffer := bufio.NewReader(file)
             for {
                 if len(array) == max {
                     return array
                 }
                 line, _, err := buffer.ReadLine()
+
                 if err == nil {
+                    // 可能是一个空换行
+                    if len(line) < 10 {
+                        continue
+                    }
                     var entry LogEntry
-                    if err := json.Unmarshal(line, &entry); err == nil {
+                    err := json.Unmarshal(line, &entry)
+                    if err == nil {
                         if !match && entry.Id == logid {
                             match = true
                         } else if entry.Id > logid {
@@ -202,17 +268,27 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
                             }
                         }
                     } else {
+                        glog.Error(err)
                         return array
                     }
                 } else {
-                    return array
+                    if err == io.EOF {
+                        break;
+                    } else {
+                        glog.Error(err)
+                        return array
+                    }
                 }
             }
         } else {
             break;
         }
-        // 下一批次
-        id += gLOGENTRY_FILE_SIZE
+        // 如果并没有查询到指定的logid，那么就不再继续，表明给定的logid非法
+        if !match {
+            break;
+        }
+        // 下一批次，注意后四位是随机数，所以这里要乘以10000
+        id += gLOGENTRY_FILE_SIZE*10000
     }
     return array
 }
