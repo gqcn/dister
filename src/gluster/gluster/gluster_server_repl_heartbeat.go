@@ -49,23 +49,19 @@ func (n *Node) uncommittedLogsLoop() {
             t      := p.Prev()
             key    := n.getCommittedCacheKeyByLogId(strconv.FormatInt(entry.Id, 10))
             if gcache.Get(key) != nil {
-                if entry.Id > n.getLastLogId() {
-                    //glog.Println("saving log id:", entry.Id)
-                    n.LogList.PushFront(entry)
-                    n.saveLogEntry(entry)
-                    gcache.Remove(key)
-                } else {
-                    //glog.Printf("failed to save log id: %d, less than %d\n", entry.Id, n.getLastLogId())
-                }
+                //glog.Println("saving log id:", entry.Id)
+                n.LogList.PushFront(entry)
+                n.saveLogEntry(entry)
+                gcache.Remove(key)
                 n.UncommittedLogList.Remove(p)
             } else {
                 //glog.Printf("log id: %d, not append log entry\n", entry.Id)
                 k := fmt.Sprintf("committed_log_id_not_found_%d", entry.Id)
                 r := gcache.Get(k)
                 if r != nil {
-                    // 该数据日志超过2秒仍未处理，那么就废弃掉，继续处理后面的数据
+                    // 该数据日志超过3秒仍未处理，那么就废弃掉，继续处理后面的数据
                     // 否则，继续等待该数据项被处理，因此，这里一条失败的数据容易造成数据写入堵塞
-                    if gtime.Second() - r.(int64) > 2 {
+                    if gtime.Second() - r.(int64) > 3 {
                         glog.Println("expired uncommitted log id:", entry.Id)
                         gcache.Remove(k)
                         n.UncommittedLogList.Remove(p)
@@ -73,13 +69,15 @@ func (n *Node) uncommittedLogsLoop() {
                         break;
                     }
                 } else {
+                    // 缓存10秒
+                    //glog.Printf("cannot find append entry for log id: %d\n", entry.Id)
                     gcache.Set(key, gtime.Second(), 10000)
                     break;
                 }
             }
             p = t
         }
-        time.Sleep(100 * time.Millisecond)
+        time.Sleep(1000 * time.Millisecond)
     }
 }
 
@@ -125,7 +123,7 @@ func (n *Node) serviceReplicationLoop() {
                     if gcache.Get(key) != nil {
                         return
                     }
-                    gcache.Set(key, 1, 10000)
+                    gcache.Set(key, struct {}{}, 10000)
                     defer gcache.Remove(key)
 
                     conn := n.getConn(info.Ip, gPORT_REPL)

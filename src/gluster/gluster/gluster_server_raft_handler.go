@@ -23,16 +23,9 @@ func (n *Node) raftTcpHandler(conn net.Conn) {
         case gMSG_RAFT_SCORE_REQUEST:           n.onMsgRaftScoreRequest(conn, msg)
         case gMSG_RAFT_SCORE_COMPARE_REQUEST:   n.onMsgRaftScoreCompareRequest(conn, msg)
         case gMSG_RAFT_SPLIT_BRAINS_CHECK:      n.onMsgRaftSplitBrainsCheck(conn, msg)
-        case gMSG_RAFT_SPLIT_BRAINS_UNSET:      n.onMsgRaftSplitBrainsUnset(conn, msg)
     }
     //这里不用自动关闭链接，由于链接有读取超时，当一段时间没有数据时会自动关闭
     n.raftTcpHandler(conn)
-}
-
-// 处理split brains问题
-func (n *Node) onMsgRaftSplitBrainsUnset(conn net.Conn, msg *Msg) {
-    glog.Println("split brains occurred, remove node:", msg.Info.Name)
-    n.Peers.Remove(msg.Info.Id)
 }
 
 // 上线通知
@@ -66,18 +59,20 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
         // 1、两个leader无法相互通信，那么两个leader处于不同的两个网络，因此需要将其中一个网络中的该follower剔除掉，只保留其在一个网络中
         // 2、两个leader可以相互通信，那么两个leader处于相同的网络，于是将两个leader相互比较，最终留下一个作为leader，另外一个作为follower
         if n.getLeader().Id != msg.Info.Id {
-            glog.Println("split brains occurred:", n.getLeader().Name, "and", msg.Info.Name)
+            glog.Printf("split brains occurred, heartbeat from: %s, but my leader is: %s\n", msg.Info.Name, n.getLeader().Name)
             leaderConn := n.getConn(n.getLeader().Ip, gPORT_RAFT)
             if leaderConn != nil {
                 if n.sendMsg(leaderConn, gMSG_RAFT_SPLIT_BRAINS_CHECK, msg.Info.Ip) == nil {
                     rmsg := n.receiveMsg(leaderConn)
                     if rmsg != nil {
-                        switch msg.Head {
+                        switch rmsg.Head {
                             case gMSG_RAFT_SPLIT_BRAINS_UNSET:
                                 result = gMSG_RAFT_SPLIT_BRAINS_UNSET
-                                n.updatePeerStatus(msg.Info.Id, gSTATUS_DEAD)
+                                glog.Printf("remove %s from my peers\n", msg.Info.Name)
+                                n.Peers.Remove(msg.Info.Id)
+
                             case gMSG_RAFT_SPLIT_BRAINS_CHANGE:
-                                n.setLeader(&msg.Info)
+                                n.setLeader(&(msg.Info))
                         }
                     }
                 }
@@ -118,6 +113,7 @@ func (n *Node) onMsgRaftSplitBrainsCheck(conn net.Conn, msg *Msg) {
     } else {
         result = gMSG_RAFT_SPLIT_BRAINS_CHANGE
     }
+    glog.Printf("brains check result: %d\n", result)
     n.sendMsg(conn, result, "")
 }
 

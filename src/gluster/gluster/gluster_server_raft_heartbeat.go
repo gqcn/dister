@@ -54,6 +54,10 @@ func (n *Node) heartbeatHandler() {
                                     n.setLeader(&(msg.Info))
                                     n.setRaftRole(gROLE_RAFT_FOLLOWER)
 
+                                case gMSG_RAFT_SPLIT_BRAINS_UNSET:
+                                    glog.Println("split brains occurred, remove node:", msg.Info.Name)
+                                    n.Peers.Remove(msg.Info.Id)
+
                                 default:
                                     time.Sleep(gELECTION_TIMEOUT_HEARTBEAT * time.Millisecond)
                             }

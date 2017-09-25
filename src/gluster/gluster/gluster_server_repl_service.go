@@ -145,7 +145,7 @@ func (n *Node) checkServiceHealth(skey string, node Service) {
     if gcache.Get(checkingKey) != nil {
         return
     }
-    gcache.Set(checkingKey, 1, 60000)
+    gcache.Set(checkingKey, struct {}{}, 60000)
     ostatus, _ := node.Node["status"]
     n.doCheckService(skey, &node)
     nstatus, _ := node.Node["status"]
@@ -162,7 +162,7 @@ func (n *Node) checkServiceHealth(skey string, node Service) {
         timeout, _ = strconv.ParseInt(interval.(string), 10, 64)
     }
 
-    gcache.Set(checkingKey, 1, timeout)
+    gcache.Set(checkingKey, struct {}{}, timeout)
 }
 
 // 健康检测服务项

@@ -1,6 +1,5 @@
-// 数据同步需要注意的是：
-// leader只有在通知完所有follower更新完数据之后，自身才会进行数据更新
-// 因此leader
+// 数据同步需要注意的是，必须在节点完成election选举之后才能进行数据通信。
+// 也就是说repl通信需要建立在raft成功作为前提
 package gluster
 
 import (
@@ -20,8 +19,16 @@ import (
 // 集群数据同步接口回调函数
 func (n *Node) replTcpHandler(conn net.Conn) {
     msg := n.receiveMsg(conn)
+    // 判断集群基础信息
     if msg == nil || msg.Info.Group != n.Group  || msg.Info.Version != gVERSION {
         //glog.Println("receive nil, auto close conn")
+        conn.Close()
+        return
+    }
+    // 判断集群权限，只有本集群的节点之间才能进行数据通信(判断id)
+    leader := n.getLeader()
+    if leader == nil || (leader.Id != msg.Info.Id && !n.Peers.Contains(msg.Info.Id)) {
+        //glog.Printf("invalid peer, id: %s, name: %s\n", msg.Info.Id, msg.Info.Name)
         conn.Close()
         return
     }
@@ -44,7 +51,7 @@ func (n *Node) replTcpHandler(conn net.Conn) {
     n.replTcpHandler(conn)
 }
 
-// kv设置，最终一致性
+// kv设置，严格按照RAFT算法保证数据的强一致性
 // 这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
 func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_FAILED
@@ -62,8 +69,8 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
             // 失败情况下日志只会不断追加，但并不会影响最终的数据结果
             if n.sendUncommittedLogEntryToPeers(entry) {
                 go n.sendAppendLogEntryToPeers(entry.Id)
-                n.LogList.PushFront(&entry)
-                n.saveLogEntry(&entry)
+                n.saveUncommittedLogEntry(&entry)
+                n.appendLogEntry(strconv.FormatInt(entry.Id, 10))
                 result = gMSG_REPL_RESPONSE
             } else {
                 glog.Error("adding data failed:", entry)
@@ -74,34 +81,46 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     n.sendMsg(conn, result, "")
 }
 
-// 确认写入日志，标识数据项可以被自动化队列处理
+// 确认写入日志，标识数据项可以被自动化队列处理，这里并不需要锁机制
 func (n *Node) onMsgAppendLogEntry(conn net.Conn, msg *Msg) {
-    gcache.Set(n.getCommittedCacheKeyByLogId(msg.Body), 1, 60000)
+    n.appendLogEntry(msg.Body)
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
 
+// 保存uncommitted log entry
+// 将数据插入到合适的链表位置，保证先进入的请求先执行
+func (n *Node) saveUncommittedLogEntry(entry *LogEntry) {
+    p      := n.UncommittedLogList.Front()
+    for p != nil {
+        if entry.Id > p.Value.(*LogEntry).Id {
+            //glog.Printf("insert log id %d before %d\n", entry.Id, p.Value.(*LogEntry).Id)
+            n.UncommittedLogList.InsertBefore(entry, p)
+            return
+        } else {
+            p = p.Next()
+        }
+    }
+    // 如果以上执行没有插入到列表中，那么直接插入到链头
+    n.UncommittedLogList.PushFront(entry)
+}
+
+// append log entry
+func (n *Node) appendLogEntry(logidstr string) {
+    //glog.Printfln("append entry log id: %s", logidstr)
+    gcache.Set(n.getCommittedCacheKeyByLogId(logidstr), struct {}{}, 3600000)
+}
+
 // 新增数据日志，提交到队列进行处理
+// 这里使用了数据锁保证请求的先进先出
 func (n *Node) onMsgUncommittedLogEntry(conn net.Conn, msg *Msg) {
     var entry LogEntry
     result := gMSG_REPL_FAILED
     if gjson.DecodeTo(msg.Body, &entry) == nil {
+        //glog.Printfln("uncommitted log id: %d", entry.Id)
         n.dmutex.Lock()
-        p := n.UncommittedLogList.Front()
-        if p != nil {
-            for p != nil {
-                if entry.Id > p.Value.(*LogEntry).Id {
-                    //glog.Printf("insert log id %d before %d\n", entry.Id, p.Value.(*LogEntry).Id)
-                    n.UncommittedLogList.InsertBefore(&entry, p)
-                    break;
-                } else {
-                    p = p.Next()
-                }
-            }
-        } else {
-            n.UncommittedLogList.PushFront(&entry)
-        }
-        result = gMSG_REPL_RESPONSE
+        n.saveUncommittedLogEntry(&entry)
         n.dmutex.Unlock()
+        result = gMSG_REPL_RESPONSE
     }
     n.sendMsg(conn, result, "")
 }
@@ -176,6 +195,7 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
 }
 
 // Service设置
+// 新写入的服务不做同步，等待服务健康检查后再做同步
 func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
     var sc ServiceConfig
     if gjson.DecodeTo(msg.Body, &sc) == nil {
@@ -184,8 +204,6 @@ func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
             key := n.getServiceKeyByNameAndIndex(sc.Name, k)
             n.Service.Set(key, Service{ sc.Type, v })
         }
-        // 新写入的服务不做同步，等待服务健康检查后再做同步
-        // n.setLastServiceLogId(gtime.Millisecond())
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
 }
@@ -398,7 +416,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
     if gcache.Get(key) != nil {
         return
     }
-    gcache.Set(key, 1, 36000000)
+    gcache.Set(key, struct {}{}, 36000000)
     defer gcache.Remove(key)
     // 支持分批同步，如果数据量大，每一次增量同步大小不超过1万条
     logid := info.LastLogId
