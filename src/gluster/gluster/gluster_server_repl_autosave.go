@@ -12,6 +12,7 @@ import (
     "sync"
     "encoding/json"
     "g/os/gcache"
+    "fmt"
 )
 
 // 日志自动保存处理
@@ -52,14 +53,14 @@ func (n *Node) saveLogList() {
     for p != nil {
         entry := p.Value.(*LogEntry)
         if entry.Id > lastid {
-            s, err := json.Marshal(*entry)
+            items, err := json.Marshal(entry.Items)
             if err != nil {
                 glog.Error("json marshal log entry error:", err)
                 break;
             }
-            s       = append(s, 10)
+            line   := fmt.Sprintf("%d,%d,%s\n", entry.Id, entry.Act, items)
             n      := n.getLogEntryBatachNo(entry.Id)
-            m[n]    = append(m[n], s...)
+            m[n]    = append(m[n], line...)
             savedid = entry.Id
         }
         p = p.Prev()

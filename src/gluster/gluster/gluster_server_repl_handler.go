@@ -241,6 +241,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
                 }
             }
         } else {
+            // @todo 必须要处理这种情况
             glog.Debugfln("failed in data replication from %s to %s, invalid log id: %d, current: %d", n.getName(), info.Name, logid, n.getLastLogId())
         }
     }

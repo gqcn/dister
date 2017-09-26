@@ -9,12 +9,13 @@ import (
     "g/os/gfile"
     "os"
     "bufio"
-    "encoding/json"
     "g/os/glog"
     "fmt"
     "g/os/gcache"
     "io"
     "g/core/types/gset"
+    "regexp"
+    "strconv"
 )
 
 // leader到其他节点的数据同步监听
@@ -182,7 +183,8 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
     if logid == 0 {
         match = true
     }
-    array := make([]LogEntry, 0)
+    array  := make([]LogEntry, 0)
+    reg, _ := regexp.Compile(`^(\d+),(\d+),(.+)$`)
     for {
         // 确定数据文件
         path      := n.getLogEntryFileSavePathById(id)
@@ -196,28 +198,34 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
                     return array
                 }
                 line, _, err := buffer.ReadLine()
-
                 if err == nil {
                     // 可能是一个空换行
                     if len(line) < 10 {
                         continue
                     }
-                    var entry LogEntry
-                    err := json.Unmarshal(line, &entry)
-                    if err == nil {
-                        if !match && entry.Id == logid {
-                            match = true
-                        } else if entry.Id > logid {
-                            if match {
-                                array = append(array, entry)
-                            } else {
-                                break;
-                            }
-                        }
-                    } else {
-                        glog.Error(err)
+                    results := reg.FindStringSubmatch(string(line))
+                    if results == nil {
                         return array
                     }
+                    rid, _ := strconv.ParseInt(results[1], 10, 64)
+                    if !match && rid == logid {
+                        match = true
+                    } else if rid > logid {
+                        if match {
+                            act, err := strconv.Atoi(results[2])
+                            items    := gjson.Decode(results[3])
+                            if err == nil && items != nil {
+                                array = append(array, LogEntry {
+                                    Id    : rid,
+                                    Act   : act,
+                                    Items : items,
+                                })
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+
                 } else {
                     if err == io.EOF {
                         break;
@@ -274,16 +282,19 @@ func (n *Node) checkValidLogIdFromFile(id int64) bool {
     if err == nil {
         defer file.Close()
         buffer := bufio.NewReader(file)
+        reg, _ := regexp.Compile(`^(\d+),.+$`)
         for {
             line, _, err := buffer.ReadLine()
             if err == nil {
-                var entry LogEntry
-                if json.Unmarshal(line, &entry) == nil {
-                    if entry.Id == id {
-                        return true
-                    } else if entry.Id > id {
-                        return false
-                    }
+                results := reg.FindStringSubmatch(string(line))
+                if results == nil {
+                    return false
+                }
+                logid, _ := strconv.ParseInt(results[1], 10, 64)
+                if logid == id {
+                    return true
+                } else if logid > id {
+                    return false
                 }
             } else {
                 break;
