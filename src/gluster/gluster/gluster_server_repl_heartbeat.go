@@ -14,15 +14,11 @@ import (
     "fmt"
     "g/os/gcache"
     "io"
-    "strconv"
-    "g/util/gtime"
+    "g/core/types/gset"
 )
 
 // leader到其他节点的数据同步监听
 func (n *Node) replicationHandler() {
-    // 未提交的数据日志自动化处理
-    go n.uncommittedLogsLoop()
-
     // 数据同步检测
     go n.dataReplicationLoop()
 
@@ -31,80 +27,44 @@ func (n *Node) replicationHandler() {
 
     // Peers同步检测
     go n.peersReplicationLoop()
+
+    // LogList定期清理
+    go n.autoCleanLogList()
 }
 
-// 根据logid获取缓存的键名
-func (n *Node) getCommittedCacheKeyByLogId(logidstr string) string {
-    return fmt.Sprintf("committed_log_id_%s", logidstr)
-}
-
-// 未提交的数据日志自动化处理
-// 由于是单线程处理，这里甚至不需要锁
-// 由于请求是异步的，这里需要对日志进行重排序
-func (n *Node) uncommittedLogsLoop() {
-    for {
-        p := n.UncommittedLogList.Back()
-        for p != nil {
-            entry  := p.Value.(*LogEntry)
-            t      := p.Prev()
-            key    := n.getCommittedCacheKeyByLogId(strconv.FormatInt(entry.Id, 10))
-            if gcache.Get(key) != nil {
-                //glog.Println("saving log id:", entry.Id)
-                n.LogList.PushFront(entry)
-                n.saveLogEntry(entry)
-                gcache.Remove(key)
-                n.UncommittedLogList.Remove(p)
-            } else {
-                //glog.Printf("log id: %d, not append log entry\n", entry.Id)
-                k := fmt.Sprintf("committed_log_id_not_found_%d", entry.Id)
-                r := gcache.Get(k)
-                if r != nil {
-                    // 该数据日志超过3秒仍未处理，那么就废弃掉，继续处理后面的数据
-                    // 否则，继续等待该数据项被处理，因此，这里一条失败的数据容易造成数据写入堵塞
-                    if gtime.Second() - r.(int64) > 3 {
-                        glog.Println("expired uncommitted log id:", entry.Id)
-                        gcache.Remove(k)
-                        n.UncommittedLogList.Remove(p)
-                    } else {
-                        break;
-                    }
-                } else {
-                    // 缓存10秒
-                    //glog.Printf("cannot find append entry for log id: %d\n", entry.Id)
-                    gcache.Set(key, gtime.Second(), 10000)
-                    break;
-                }
-            }
-            p = t
-        }
-        time.Sleep(1000 * time.Millisecond)
-    }
-}
-
-// 日志自动同步检查
+// 日志自动同步检查，每一个节点保持一个线程检查，保证同步能够快速进行
 func (n *Node) dataReplicationLoop() {
+    // 存储已经保持心跳的节点
+    conns := gset.NewStringSet()
     for {
         if n.getRaftRole() == gROLE_RAFT_LEADER {
             for _, v := range n.Peers.Values() {
                 info := v.(NodeInfo)
-                if info.Status != gSTATUS_ALIVE {
+                if conns.Contains(info.Id) || info.Status != gSTATUS_ALIVE || info.Id == n.getId() {
                     continue
                 }
-                go func(ip string) {
-                    conn := n.getConn(ip, gPORT_REPL)
-                    if conn != nil {
-                        defer conn.Close()
-                        if n.sendMsg(conn, gMSG_REPL_DATA_UPDATE_CHECK, "") == nil {
-                            msg := n.receiveMsg(conn)
-                            if msg != nil && msg.Head == gMSG_REPL_RESPONSE {
-                                n.updateDataToRemoteNode(conn, &msg.Info)
+                go func(id, ip string) {
+                    conns.Add(id)
+                    defer conns.Remove(id)
+                    for {
+                        // 如果当前节点不再是leader，或者节点表中已经删除该节点信息
+                        if n.getRaftRole() != gROLE_RAFT_LEADER || !n.Peers.Contains(id) {
+                            return
+                        }
+                        info := n.Peers.Get(id).(NodeInfo)
+                        if n.getLastLogId() > info.LastLogId {
+                            conn := n.getConn(ip, gPORT_REPL)
+                            if conn != nil {
+                                n.updateDataToRemoteNode(conn, &info)
+                                conn.Close()
                             }
                         }
+                        time.Sleep(gLOG_REPL_DATA_UPDATE_INTERVAL * time.Millisecond)
                     }
-                }(info.Ip)
+                }(info.Id, info.Ip)
             }
         }
-        time.Sleep(gLOG_REPL_DATA_UPDATE_INTERVAL * time.Millisecond)
+        time.Sleep(1000 * time.Millisecond)
     }
 }
 
@@ -161,21 +121,6 @@ func (n *Node) peersReplicationLoop() {
     }
 }
 
-// 获取节点中已同步的最小的log id
-func (n *Node) getMinLogIdFromPeers() int64 {
-    var minLogId int64 = n.getLastLogId()
-    for _, v := range n.Peers.Values() {
-        info := v.(NodeInfo)
-        if info.Status != gSTATUS_ALIVE {
-            continue
-        }
-        if minLogId == 0 || info.LastLogId < minLogId {
-            minLogId = info.LastLogId
-        }
-    }
-    return minLogId
-}
-
 // 根据logid获取还未更新的日志列表
 // 注意：为保证日志一致性，在进行日志更新时，需要查找到目标节点logid在本地日志中存在有**完整匹配**的logid日志，并将其后的日志列表返回
 // 如果出现leader的logid比follower大，并且获取不到更新的日志列表时，表示两者数据已经不一致，需要做完整的同步复制处理
@@ -184,7 +129,7 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
     array := make([]LogEntry, 0)
     if n.getLastLogId() > id {
         // 首先从内存中获取，需要注意的是，
-        // 如果内存列表中最小的logid比请求的大，数据会有缺失，必须从磁盘中读取
+        // 如果内存列表中最小的logid比请求的大，数据会有缺失，必须从磁盘中读取（一般不会出现，因为自动清理loglist是会判断所有节点同步完成后才会执行）
         // 因此，内容列表中的logid必须包含请求的logid
         if n.LogList.Len() > 0 {
             match := false
@@ -215,7 +160,11 @@ func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
         length := len(array)
         if length < 1 || (length < max && array[length - 1].Id < id) {
             left   := max - length
-            result := n.getLogEntryListFromFileByLogId(id, left)
+            leftid := id
+            if length > 0 {
+                leftid = array[length - 1].Id
+            }
+            result := n.getLogEntryListFromFileByLogId(leftid, left)
             if result != nil && len(result) > 0 {
                 array = append(array, result...)
             }
@@ -283,7 +232,7 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
         }
         // 如果并没有查询到指定的logid，那么就不再继续，表明给定的logid非法
         if !match {
-            break;
+            break
         }
         // 下一批次，注意后四位是随机数，所以这里要乘以10000
         id += gLOGENTRY_FILE_SIZE*10000
@@ -299,23 +248,27 @@ func (n *Node) isValidLogId(id int64) bool {
         if lastLogId == id {
             return true
         }
-        //n.LogList.RLock()
         l := n.LogList.Back()
-        for l != nil {
-            r := l.Value.(*LogEntry)
-            if r.Id == id {
-                return true
-            } else if r.Id < id {
-                l = l.Prev()
-            } else {
-                return false
+        if l != nil && l.Value.(*LogEntry).Id < id {
+            for l != nil {
+                r := l.Value.(*LogEntry)
+                if r.Id == id {
+                    return true
+                } else if r.Id < id {
+                    l = l.Prev()
+                } else {
+                    return false
+                }
             }
         }
-        //n.LogList.RUnlock()
     } else {
         return false
     }
-    // 如果在现有的LogList查找不到，那么进入文件查找
+    return n.checkValidLogIdFromFile(id)
+}
+
+// 从物理化文件中查找logid的有效性
+func (n *Node) checkValidLogIdFromFile(id int64) bool {
     path      := n.getLogEntryFileSavePathById(id)
     file, err := gfile.OpenWithFlag(path, os.O_RDONLY)
     if err == nil {
@@ -338,4 +291,47 @@ func (n *Node) isValidLogId(id int64) bool {
         }
     }
     return false
+}
+
+// 定期清理已经同步完毕的日志列表，注意：***leader和follower都需要清理***
+// 获取所有已存活的节点的最小日志ID，清理本地日志列表中比该ID小的记录(需要在内存中保留最小记录，以便对最新数据做合法性判断)
+func (n *Node) autoCleanLogList() {
+    for {
+        time.Sleep(gLOG_REPL_LOGCLEAN_INTERVAL * time.Millisecond)
+        minLogId := n.getMinLogIdFromPeers()
+        if minLogId == 0 {
+            continue
+        }
+        // 必须保证日志先保存完毕再清理
+        if minLogId > n.getLastSavedLogId() {
+            minLogId = n.getLastSavedLogId()
+        }
+        p := n.LogList.Back()
+        for p != nil {
+            entry := p.Value.(*LogEntry)
+            if entry.Id < minLogId {
+                //glog.Printfln("auto clean log id: %d", entry.Id)
+                t := p.Prev()
+                n.LogList.Remove(p)
+                p  = t
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+// 获取节点中已同步的最小的log id
+func (n *Node) getMinLogIdFromPeers() int64 {
+    var minLogId int64 = n.getLastLogId()
+    for _, v := range n.Peers.Values() {
+        info := v.(NodeInfo)
+        if info.Status != gSTATUS_ALIVE {
+            continue
+        }
+        if minLogId == 0 || info.LastLogId < minLogId {
+            minLogId = info.LastLogId
+        }
+    }
+    return minLogId
 }

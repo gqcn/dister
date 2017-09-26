@@ -6,11 +6,11 @@
 # 编译
 go build src/gluster/gluster.go
 ## 同步执行文件到测试节点
-sshpass -p 123456 scp -P 22 ./gluster john@192.168.2.63:/home/john/gluster
+sshpass -p 123456 scp -P 22 ./gluster john@192.168.2.62:/home/john/gluster
 sshpass -p 123456 scp -P 22 ./gluster john@192.168.2.121:/home/john/gluster
 #sshpass -p 123456 scp -P 22 ./gluster john@192.168.2.114:/home/john/gluster
 # 同步配置文件到测试节点
-#sshpass -p 123456 scp -P 22 ./src/gluster/gluster_server.json john@192.168.2.63:/home/john/gluster.json
+#sshpass -p 123456 scp -P 22 ./src/gluster/gluster_server.json john@192.168.2.62:/home/john/gluster.json
 #sshpass -p 123456 scp -P 22 ./src/gluster/gluster_server.json john@192.168.2.121:/home/john/gluster.json
 #sshpass -p 123456 scp -P 22 ./src/gluster/gluster_server.json john@192.168.2.114:/home/john/gluster.json
 ##删除本地执行文件

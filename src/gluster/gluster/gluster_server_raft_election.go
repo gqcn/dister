@@ -14,7 +14,7 @@ func (n *Node) electionHandler() {
     for {
         if n.Role == gROLE_SERVER && n.getRaftRole() != gROLE_RAFT_LEADER && gtime.Millisecond() >= n.getElectionDeadline() {
             // 使用MinNode变量控制最小节点数(这里判断的时候要去除自身的数量)
-            if n.Peers.Size() >= n.MinNode - 1 {
+            if n.Peers.Size() >= int(n.MinNode - 1) {
                 if n.Peers.Size() > 0 {
                     // 集群是2个节点及以上
                     n.resetAsCandidate()
@@ -94,7 +94,7 @@ func (n *Node) beginScore() {
     // 注意这里的ScoreCount和n.Peers.Size都不包含自身
     scoreCount := n.getScoreCount() + 1
     leastCount := int((n.Peers.Size() + 1)/2) + 1
-    if scoreCount < leastCount {
+    if scoreCount < int32(leastCount) {
         n.updateElectionDeadline()
         //glog.Printf("election failed: could not reach major of the nodes, score count:%d, group size:%d\n", scoreCount, n.Peers.Size() + 1)
         return

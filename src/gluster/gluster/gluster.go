@@ -28,7 +28,7 @@ import (
 )
 
 const (
-    gVERSION                                = "1.0"   // 当前版本
+    gVERSION                                = "1.2"   // 当前版本
     gDEBUG                                  = true    // 用于控制调试信息，开发阶段使用
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
@@ -56,13 +56,13 @@ const (
 
     // 超时时间设置
     gTCP_RETRY_COUNT                        = 0       // TCP请求失败时的重试次数
-    gTCP_READ_TIMEOUT                       = 3000    // (毫秒)TCP链接读取超时
-    gTCP_WRITE_TIMEOUT                      = 3000    // (毫秒)TCP链接写入超时
+    gTCP_READ_TIMEOUT                       = 6000    // (毫秒)TCP链接读取超时
     gELECTION_TIMEOUT                       = 2000    // (毫秒)RAFT选举超时时间
     gELECTION_TIMEOUT_HEARTBEAT             = 1000    // (毫秒)RAFT Leader统治维持心跳间隔
-    gLOG_REPL_DATA_UPDATE_INTERVAL          = 2000    // (毫秒)数据同步检测心跳间隔
+    gLOG_REPL_DATA_UPDATE_INTERVAL          = 100     // (毫秒)数据同步间隔
     gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 2000    // (毫秒)Service同步检测心跳间隔
     gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔
+    gLOG_REPL_LOGCLEAN_INTERVAL             = 2000    // (毫秒)LogList定期清理过期(已同步)的日志列表
     gLOG_REPL_PEERS_INTERVAL                = 2000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL          = 2000    // (毫秒)健康检查默认间隔
 
@@ -83,15 +83,12 @@ const (
     // 数据同步操作
     gMSG_REPL_DATA_SET                      = 300
     gMSG_REPL_DATA_REMOVE                   = 310
-    gMSG_REPL_DATA_UPDATE_CHECK             = 315
-    gMSG_REPL_DATA_INCREMENTAL_UPDATE       = 320
-    gMSG_REPL_DATA_UNCOMMITED_LOG_ENTRY     = 335
-    gMSG_REPL_DATA_APPEND_LOG_ENTRY         = 338
-    gMSG_REPL_FAILED                        = 350
-    gMSG_REPL_RESPONSE                      = 360
-    gMSG_REPL_PEERS_UPDATE                  = 370
-    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 380
-    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 390
+    gMSG_REPL_DATA_REPLICATION              = 320
+    gMSG_REPL_FAILED                        = 330
+    gMSG_REPL_RESPONSE                      = 340
+    gMSG_REPL_PEERS_UPDATE                  = 350
+    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 360
+    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 370
 
     // API相关
     gMSG_API_PEERS_ADD                      = 500
@@ -120,20 +117,20 @@ type Node struct {
     CfgFilePath          string                   // 配置文件绝对路径
     CfgReplicated        bool                     // 本地配置对象是否已同步到leader(配置同步需要注意覆盖问题)
     Peers                *gmap.StringInterfaceMap // 集群所有的节点信息(ip->节点信息)，不包含自身
-    Role                 int                      // 集群角色
-    RaftRole             int                      // RAFT角色
+    Role                 int32                    // 集群角色
+    RaftRole             int32                    // RAFT角色
     Leader               *NodeInfo                // Leader节点信息
-    MinNode              int                      // 最小节点数
+    MinNode              int32                    // 最小节点数
     Score                int64                    // 选举比分
-    ScoreCount           int                      // 选举比分的节点数
+    ScoreCount           int32                    // 选举比分的节点数
     ElectionDeadline     int64                    // 选举超时时间点
     AutoScan             bool                     // 启动时自动扫描局域网，添加gluster节点
 
     LogIdIndex           int64                    // 用于生成LogId的参考字段
     LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
+    LastSavedLogId       int64                    // 最后一次吴丽华保存log的id，用物理化存储判断
     LastServiceLogId     int64                    // 最后一次保存的service id号，用以识别service信息同步
     LogList              *glist.SafeList          // leader日志列表，用以数据同步
-    UncommittedLogList   *glist.SafeList          // uncommitted log entry列表
     SavePath             string                   // 物理存储的本地数据*目录*绝对路径
     Service              *gmap.StringInterfaceMap // 存储的服务配置表
     DataMap              *gmap.StringStringMap    // 存储的K-V哈希表
@@ -189,11 +186,11 @@ type NodeInfo struct {
     Id               string `json:"id"`
     Name             string `json:"name"`
     Ip               string `json:"ip"`
-    Status           int    `json:"status"`
-    Role             int    `json:"role"`
-    RaftRole         int    `json:"rrole"`
+    Status           int32  `json:"status"`
+    Role             int32  `json:"role"`
+    RaftRole         int32  `json:"rrole"`
     Score            int64  `json:"score"`
-    ScoreCount       int    `json:"scount"`
+    ScoreCount       int32  `json:"scount"`
     LastLogId        int64  `json:"logid"`
     LastServiceLogId int64  `json:"slogid"`
     Version          string `json:"version"`
@@ -227,7 +224,6 @@ func NewServer() *Node {
         Peers               : gmap.NewStringInterfaceMap(),
         SavePath            : gfile.SelfDir(),
         LogList             : glist.NewSafeList(),
-        UncommittedLogList  : glist.NewSafeList(),
         Service             : gmap.NewStringInterfaceMap(),
         DataMap             : gmap.NewStringStringMap(),
     }
@@ -367,7 +363,7 @@ func SendMsg(conn net.Conn, head int, body string) error {
 }
 
 // 将集群角色字段转换为可读的字符串
-func roleName(role int) string {
+func roleName(role int32) string {
     switch role {
         case gROLE_CLIENT:  return "client"
         case gROLE_SERVER:  return "server"
@@ -377,7 +373,7 @@ func roleName(role int) string {
 }
 
 // 将RAFT角色字段转换为可读的字符串
-func raftRoleName(role int) string {
+func raftRoleName(role int32) string {
     switch role {
         case gROLE_RAFT_FOLLOWER:  return "follower"
         case gROLE_RAFT_CANDIDATE: return "candidate"

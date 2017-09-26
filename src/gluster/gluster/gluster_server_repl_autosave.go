@@ -11,15 +11,25 @@ import (
     "g/encoding/gcompress"
     "sync"
     "encoding/json"
+    "g/os/gcache"
 )
 
 // 日志自动保存处理
 func (n *Node) autoSavingHandler() {
+    go func() {
+        // 初始化LastSavedId
+        n.setLastSavedLogId(n.getLastLogId())
+        for {
+            if n.getLastSavedLogId() != n.getLastLogId() {
+                n.saveLogList()
+            }
+            time.Sleep(gLOG_REPL_AUTOSAVE_INTERVAL * time.Millisecond)
+        }
+    }()
+
     lastLogId     := n.getLastLogId()
     lastServiceId := n.getLastServiceLogId()
     for {
-        n.saveLogList()
-        //n.savePeersToFile()
         if n.getLastLogId() != lastLogId {
             n.saveDataToFile()
             lastLogId = n.getLastLogId()
@@ -32,45 +42,46 @@ func (n *Node) autoSavingHandler() {
     }
 }
 
-// 定期物理化存储已经同步完毕的日志列表，注意：***leader和follower都需要清理***
+// 定期物理化存储日志列表
 func (n *Node) saveLogList() {
+    // 构造数据集合
+    savedid := n.getLastSavedLogId()
+    lastid  := savedid
+    m := make(map[int][]byte)
     p := n.LogList.Back()
     for p != nil {
         entry := p.Value.(*LogEntry)
-        t      := p.Prev()
-        s, err := json.Marshal(*entry)
-        if err != nil {
-            glog.Error("json marshal log entry error:", err)
-            break;
+        if entry.Id > lastid {
+            s, err := json.Marshal(*entry)
+            if err != nil {
+                glog.Error("json marshal log entry error:", err)
+                break;
+            }
+            s       = append(s, 10)
+            n      := n.getLogEntryBatachNo(entry.Id)
+            m[n]    = append(m[n], s...)
+            savedid = entry.Id
         }
-        s   = append(s, 10)
-        err = gfile.PutBinContentsAppend(n.getLogEntryFileSavePathById(entry.Id), s)
-        if err == nil {
-            n.LogList.Remove(p)
-        } else {
-            glog.Error("save data entry error:", err)
+        p = p.Prev()
+    }
+    // 批量写入
+    if len(m) > 0 {
+        for k, v := range m {
+            gfile.PutBinContentsAppend(n.getLogEntryFileSavePathByBatchNo(k), v)
         }
-        p = t
-    }
-}
-
-// 保存Peers到磁盘
-func (n *Node) savePeersToFile() {
-    info         := n.getNodeInfo()
-    data         := *n.Peers.Clone()
-    data[info.Id] = info
-    content := []byte(gjson.Encode(&data))
-    if gCOMPRESS_SAVING {
-        content = gcompress.Zlib(content)
-    }
-    err := gfile.PutBinContents(n.getPeersFilePath(), content)
-    if err != nil {
-        glog.Error("saving peers error:", err)
+        n.setLastSavedLogId(savedid)
     }
 }
 
 // 保存数据到磁盘
 func (n *Node) saveDataToFile() {
+    key := "auto_saving_data"
+    if gcache.Get(key) != nil {
+        return
+    }
+    gcache.Set(key, struct {}{}, 6000000)
+    defer gcache.Remove(key)
+
     data := make(map[string]interface{})
     data  = map[string]interface{} {
         "LastLogId" : n.getLastLogId(),
@@ -88,6 +99,13 @@ func (n *Node) saveDataToFile() {
 
 // 保存Service到磁盘
 func (n *Node) saveServiceToFile() {
+    key := "auto_saving_service"
+    if gcache.Get(key) != nil {
+        return
+    }
+    gcache.Set(key, struct {}{}, 6000000)
+    defer gcache.Remove(key)
+
     data := make(map[string]interface{})
     data  = map[string]interface{} {
         "LastServiceLogId"  : n.getLastServiceLogId(),
@@ -106,11 +124,6 @@ func (n *Node) saveServiceToFile() {
 // 从物理化文件中恢复变量
 func (n *Node) restoreFromFile() {
     var wg sync.WaitGroup
-    wg.Add(1)
-    go func() {
-        n.restorePeers()
-        wg.Done()
-    }()
 
     wg.Add(1)
     go func() {
@@ -124,31 +137,6 @@ func (n *Node) restoreFromFile() {
         wg.Done()
     }()
     wg.Wait()
-}
-
-// 恢复Peers
-func (n *Node) restorePeers() {
-    path := n.getPeersFilePath()
-    if gfile.Exists(path) {
-        bin := gfile.GetBinContents(path)
-        if gCOMPRESS_SAVING {
-            bin = gcompress.UnZlib(bin)
-        }
-        if bin != nil && len(bin) > 0 {
-            //glog.Println("restore peers from", path)
-            m := make(map[string]NodeInfo)
-            if err := gjson.DecodeTo(string(bin), &m); err == nil {
-                myid := n.getId()
-                for k, v := range m {
-                    if k != myid && !n.Peers.Contains(k) {
-                        n.Peers.Set(k, v)
-                    }
-                }
-            } else {
-                glog.Error(err)
-            }
-        }
-    }
 }
 
 // 恢复DataMap

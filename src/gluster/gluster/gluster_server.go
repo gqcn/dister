@@ -18,17 +18,22 @@ import (
     "os"
     "errors"
     "g/util/grand"
+    "sync/atomic"
 )
 
-// 获取Msg
+// 获取Msg，使用默认的超时时间
 func (n *Node) receiveMsg(conn net.Conn) *Msg {
-    conn.SetReadDeadline(time.Now().Add(gTCP_READ_TIMEOUT * time.Millisecond))
-    return RecieveMsg(conn)
+    return n.receiveMsgWithTimeout(conn, gTCP_READ_TIMEOUT * time.Millisecond)
 }
 
 // 获取Msg，自定义超时时间
 func (n *Node) receiveMsgWithTimeout(conn net.Conn, timeout time.Duration) *Msg {
     conn.SetReadDeadline(time.Now().Add(timeout))
+    return RecieveMsg(conn)
+}
+
+// 获取Msg，不超时
+func (n *Node) receiveMsgWithoutTimeout(conn net.Conn, timeout time.Duration) *Msg {
     return RecieveMsg(conn)
 }
 
@@ -116,6 +121,9 @@ func (n *Node) Run() {
     if n.AutoScan {
         n.sayHiToLocalLan()
     }
+
+    // 其他一些处理
+    glog.SetDebug(gDEBUG)
 }
 
 // 从命令行读取配置文件内容
@@ -135,7 +143,7 @@ func (n *Node) initFromCommand() {
     if role < 0 || role > 2 {
         glog.Fatalln("invalid role setting, exit")
     } else {
-        n.setRole(role)
+        n.setRole(int32(role))
     }
     // 数据保存路径(请保证运行gcluster的用户有权限写入)
     savepath := gconsole.Option.Get("SavePath")
@@ -161,7 +169,7 @@ func (n *Node) initFromCommand() {
     // (可选)节点地址IP或者域名
     minNode := gconsole.Option.GetInt("MinNode")
     if minNode != 0 {
-        n.setMinNode(minNode)
+        n.setMinNode(int32(minNode))
     }
     // (可选)初始化节点列表，包含自定义的所需添加的服务器IP或者域名列表
     peerstr := gconsole.Option.Get("Peers")
@@ -209,7 +217,7 @@ func (n *Node) initFromCfg() {
     if role < 0 || role > 2 {
         glog.Fatalln("invalid role setting, exit")
     } else {
-        n.setRole(role)
+        n.setRole(int32(role))
     }
     // 数据保存路径(请保证运行gcluster的用户有权限写入)
     savepath := j.GetString("SavePath")
@@ -233,7 +241,7 @@ func (n *Node) initFromCfg() {
     // (可选)节点地址IP或者域名
     minNode := j.GetInt("MinNode")
     if minNode != 0 {
-        n.setMinNode(minNode)
+        n.setMinNode(int32(minNode))
     }
     // (可选)初始化节点列表，包含自定义的所需添加的服务器IP或者域名列表
     params := j.GetArray("Peers")
@@ -488,53 +496,36 @@ func (n *Node) getLeader() *NodeInfo {
     return r
 }
 
-func (n *Node) getRaftRole() int {
-    n.mutex.RLock()
-    r := n.RaftRole
-    n.mutex.RUnlock()
-    return r
+func (n *Node) getRaftRole() int32 {
+    return atomic.LoadInt32(&n.RaftRole)
 }
 
 func (n *Node) getScore() int64 {
-    n.mutex.RLock()
-    r := n.Score
-    n.mutex.RUnlock()
-    return r
+    return atomic.LoadInt64(&n.Score)
 }
 
-func (n *Node) getScoreCount() int {
-    n.mutex.RLock()
-    r := n.ScoreCount
-    n.mutex.RUnlock()
-    return r
+func (n *Node) getScoreCount() int32 {
+    return atomic.LoadInt32(&n.ScoreCount)
 }
 
 func (n *Node) getLastLogId() int64 {
-    n.mutex.RLock()
-    r := n.LastLogId
-    n.mutex.RUnlock()
-    return r
+    return atomic.LoadInt64(&n.LastLogId)
 }
 
-func (n *Node) getMinNode() int {
-    n.mutex.RLock()
-    r := n.MinNode
-    n.mutex.RUnlock()
-    return r
+func (n *Node) getMinNode() int32 {
+    return atomic.LoadInt32(&n.MinNode)
+}
+
+func (n *Node) getLastSavedLogId() int64 {
+    return atomic.LoadInt64(&n.LastSavedLogId)
 }
 
 func (n *Node) getLastServiceLogId() int64 {
-    n.mutex.Lock()
-    r := n.LastServiceLogId
-    n.mutex.Unlock()
-    return r
+    return atomic.LoadInt64(&n.LastServiceLogId)
 }
 
 func (n *Node) getElectionDeadline() int64 {
-    n.mutex.RLock()
-    r := n.ElectionDeadline
-    n.mutex.RUnlock()
-    return r
+    return atomic.LoadInt64(&n.ElectionDeadline)
 }
 
 func (n *Node) getPeersFilePath() string {
@@ -560,25 +551,30 @@ func (n *Node) getServiceFilePath() string {
 
 // 根据logid计算数据存储的文件绝对路径，每个数据日志文件最大存储10万条记录
 func (n *Node) getLogEntryFileSavePathById(id int64) string {
-    r := int(id/10000/gLOGENTRY_FILE_SIZE)
+    return n.getLogEntryFileSavePathByBatchNo(n.getLogEntryBatachNo(id))
+}
+
+// 根据批次号获取日志文件存储绝对路径
+func (n *Node) getLogEntryFileSavePathByBatchNo(no int) string {
     n.mutex.RLock()
-    path := n.SavePath + gfile.Separator + fmt.Sprintf("gluster.entry.%d.db", r)
+    path := n.SavePath + gfile.Separator + fmt.Sprintf("gluster.entry.%d.db", no)
     n.mutex.RUnlock()
     return path
 }
 
+// 获得logid存储的批次编号，用于文件存储的分组
+func (n *Node) getLogEntryBatachNo(id int64) int {
+    return int(id/10000/gLOGENTRY_FILE_SIZE)
+}
+
 // 添加比分节
 func (n *Node) addScore(s int64) {
-    n.mutex.Lock()
-    n.Score += s
-    n.mutex.Unlock()
+    atomic.AddInt64(&n.Score, s)
 }
 
 // 添加比分节点数
 func (n *Node) addScoreCount() {
-    n.mutex.Lock()
-    n.ScoreCount++
-    n.mutex.Unlock()
+    atomic.AddInt32(&n.ScoreCount, 1)
 }
 
 // 重置为候选者，并初始化投票给自己
@@ -609,19 +605,15 @@ func (n *Node) setIp(ip string) {
     n.mutex.Unlock()
 }
 
-func (n *Node) setMinNode(count int) {
-    n.mutex.Lock()
-    n.MinNode = count
-    n.mutex.Unlock()
+func (n *Node) setMinNode(count int32) {
+    atomic.StoreInt32(&n.MinNode, count)
 }
 
-func (n *Node) setRole(role int) {
-    n.mutex.Lock()
-    n.Role = role
-    n.mutex.Unlock()
+func (n *Node) setRole(role int32) {
+    atomic.StoreInt32(&n.Role, role)
 }
 
-func (n *Node) setRaftRole(role int) {
+func (n *Node) setRaftRole(role int32) {
     n.mutex.Lock()
     if n.RaftRole != role {
         glog.Printf("role changed from %s to %s\n", raftRoleName(n.RaftRole), raftRoleName(role))
@@ -655,15 +647,15 @@ func (n *Node) SetSavePath(path string) {
 }
 
 func (n *Node) setLastLogId(id int64) {
-    n.mutex.Lock()
-    n.LastLogId = id
-    n.mutex.Unlock()
+    atomic.StoreInt64(&n.LastLogId, id)
+}
+
+func (n *Node) setLastSavedLogId(id int64) {
+    atomic.StoreInt64(&n.LastSavedLogId, id)
 }
 
 func (n *Node) setLastServiceLogId(id int64) {
-    n.mutex.Lock()
-    n.LastServiceLogId = id
-    n.mutex.Unlock()
+    atomic.StoreInt64(&n.LastServiceLogId, id)
 }
 
 func (n *Node) setService(m *gmap.StringInterfaceMap) {
@@ -704,7 +696,7 @@ func (n *Node) updatePeerInfo(info NodeInfo) {
     }
 }
 
-func (n *Node) updatePeerStatus(Id string, status int) {
+func (n *Node) updatePeerStatus(Id string, status int32) {
     r := n.Peers.Get(Id)
     if r != nil {
         info       := r.(NodeInfo)
