@@ -42,7 +42,7 @@ func (n *Node) beginScore() {
     // 请求比分，获取比分数据
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
-        if info.Status != gSTATUS_ALIVE {
+        if info.Status != gSTATUS_ALIVE || n.getId() == info.Id {
             continue
         }
         wg.Add(1)
@@ -74,7 +74,7 @@ func (n *Node) beginScore() {
                 }
                 switch msg.Head {
                     case gMSG_RAFT_I_AM_LEADER:
-                        n.setLeader(info)
+                        n.setLeader(&msg.Info)
                         n.setRaftRole(gROLE_RAFT_FOLLOWER)
 
                     case gMSG_RAFT_RESPONSE:
@@ -132,16 +132,20 @@ func (n *Node) beginScore() {
                     return
                 }
                 switch msg.Head {
+                    // 对比过程中发现leader，那么设置leader
                     case gMSG_RAFT_I_AM_LEADER:
                         glog.Println("score comparison: get leader from", msg.Info.Name)
                         n.setLeader(&msg.Info)
                         n.setRaftRole(gROLE_RAFT_FOLLOWER)
+                        n.updateElectionDeadline()
 
+                    // 我比你更有资格当leader，别烦大人干正事，你自己先一边玩去
                     case gMSG_RAFT_SCORE_COMPARE_FAILURE:
                         glog.Println("score comparison: get failure from", msg.Info.Name)
-                        n.setLeader(&msg.Info)
-                        n.setRaftRole(gROLE_RAFT_FOLLOWER)
+                        n.setRaftRole(gROLE_RAFT_FOLLOWER) // 别烦大人干正事
+                        n.updateElectionDeadline()         // 自己先一边玩去
 
+                    // 对比成功，向leader的路又更迈进一步
                     case gMSG_RAFT_SCORE_COMPARE_SUCCESS:
                         glog.Println("score comparison: get success from", msg.Info.Name)
                 }
@@ -150,8 +154,8 @@ func (n *Node) beginScore() {
     }
     wg.Wait()
 
-    // 如果peers中的节点均没有条件满足leader，那么选举自身为leader
-    if n.getRaftRole() != gROLE_RAFT_FOLLOWER {
+    // 判断是否选举失败
+    if !n.checkFailedTheElection() {
         //glog.Println("won the score comparison, become the leader")
         n.setLeader(n.getNodeInfo())
         n.setRaftRole(gROLE_RAFT_LEADER)

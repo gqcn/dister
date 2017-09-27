@@ -11,6 +11,8 @@ import (
     "time"
     "fmt"
     "g/core/types/gset"
+    "strconv"
+    "g/os/gfile"
 )
 
 // 集群数据同步接口回调函数
@@ -36,6 +38,7 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
         case gMSG_REPL_DATA_REPLICATION:            n.onMsgReplDataReplication(conn, msg)
+        case gMSG_REPL_VALID_LOGID_CHECK:           n.onMsgReplValidLogIdCheck(conn, msg)
         case gMSG_REPL_CONFIG_FROM_FOLLOWER:        n.onMsgConfigFromFollower(conn, msg)
         case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:   n.onMsgServiceCompletelyUpdate(conn, msg)
         case gMSG_API_SERVICE_SET:                  n.onMsgServiceSet(conn, msg)
@@ -45,14 +48,14 @@ func (n *Node) replTcpHandler(conn net.Conn) {
     n.replTcpHandler(conn)
 }
 
-// kv设置，严格按照RAFT算法保证数据的强一致性
-// 这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
+// kv设置，这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
 func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_RESPONSE
     if n.getRaftRole() == gROLE_RAFT_LEADER {
-        var items interface{}
-        if gjson.DecodeTo(msg.Body, &items) == nil {
-            n.dmutex.Lock()
+        n.dmutex.Lock()
+        items := gjson.Decode(msg.Body)
+        // 由于锁机制在请求量大的情况下会造成请求排队阻塞，因此这里面还需要再判断一下当前节点角色，防止在阻塞过程中角色的转变
+        if n.getRaftRole() == gROLE_RAFT_LEADER && items != nil {
             var entry = LogEntry {
                 Id    : n.makeLogId(),
                 Act   : msg.Head,
@@ -60,8 +63,10 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
             }
             n.LogList.PushFront(&entry)
             n.saveLogEntry(&entry)
-            n.dmutex.Unlock()
+        } else {
+            result = gMSG_REPL_FAILED
         }
+        n.dmutex.Unlock()
     } else {
         result = gMSG_REPL_FAILED
     }
@@ -161,8 +166,25 @@ func (n *Node) saveLogEntry(entry *LogEntry) {
     lastLogId := n.getLastLogId()
     if entry.Id < lastLogId {
         // 在高并发下，有可能会出现这种情况，提出警告
-        glog.Warning(fmt.Sprintf("expired log entry, received:%d, current:%d", entry.Id, lastLogId))
+        glog.Errorfln("expired log entry, received:%d, current:%d", entry.Id, lastLogId)
+        return
     }
+    // 首先记录日志(不做缓存，直接写入，防止数据丢失)
+    n.saveLogEntryToFile(entry)
+    // 其次写入DataMap
+    n.saveLogEntryToVar(entry)
+    // 保存最新的LogId到内存
+    n.setLastLogId(entry.Id)
+}
+
+// 保存LogEntry到日志文件中
+func (n *Node) saveLogEntryToFile(entry *LogEntry) {
+    c := fmt.Sprintf("%d,%d,%s\n", entry.Id, entry.Act, gjson.Encode(entry.Items))
+    gfile.PutBinContentsAppend(n.getLogEntryFileSavePathById(entry.Id), []byte(c))
+}
+
+// 保存LogEntry到内存变量
+func (n *Node) saveLogEntryToVar(entry *LogEntry) {
     switch entry.Act {
         case gMSG_REPL_DATA_SET:
             for k, v := range entry.Items.(map[string]interface{}) {
@@ -173,9 +195,7 @@ func (n *Node) saveLogEntry(entry *LogEntry) {
             for _, v := range entry.Items.([]interface{}) {
                 n.DataMap.Remove(v.(string))
             }
-
     }
-    n.setLastLogId(entry.Id)
 }
 
 // 数据同步，更新本地数据
@@ -214,38 +234,110 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
     // 支持分批同步，如果数据量大，每一次增量同步大小不超过1万条
     logid := info.LastLogId
     if n.getLastLogId() > info.LastLogId {
-        if logid == 0 || (logid != 0 && n.isValidLogId(logid)) {
-            //glog.Println("start data incremental replication from", n.getName(), "to", info.Name)
-            for {
-                // 每批次的数据量要考虑到目标节点写入的时间会不会超过TCP读取等待超时时间
-                list   := n.getLogEntriesByLastLogId(logid, 10000)
-                length := len(list)
-                if length > 0 {
-                    glog.Debugfln("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d", n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
-                    if err := n.sendMsg(conn, gMSG_REPL_DATA_REPLICATION, gjson.Encode(list)); err != nil {
-                        glog.Error(err)
+        if !n.isValidLogId(logid) {
+            glog.Errorfln("invalid log id: %d from %s, maybe it's a node from another cluster, or its data was collapsed.", logid, info.Name)
+            glog.Errorfln("%s is now removed from this cluster, please manually check and repair this error, and then re-add it to cluster.", info.Name)
+            n.Peers.Remove(info.Id)
+            return
+        }
+
+        //glog.Println("start data incremental replication from", n.getName(), "to", info.Name)
+        for {
+            // 每批次的数据量要考虑到目标节点写入的时间会不会超过TCP读取等待超时时间
+            list   := n.getLogEntriesByLastLogId(logid, 10000, false)
+            length := len(list)
+            if length > 0 {
+                glog.Debugfln("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d", n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
+                if err := n.sendMsg(conn, gMSG_REPL_DATA_REPLICATION, gjson.Encode(list)); err != nil {
+                    glog.Error(err)
+                    time.Sleep(time.Second)
+                    return
+                }
+                if rmsg := n.receiveMsgWithTimeout(conn, 10*time.Second); rmsg != nil {
+                    n.updatePeerInfo(rmsg.Info)
+                    logid = rmsg.Info.LastLogId
+                    if n.getLastLogId() == logid {
                         return
                     }
-                    if rmsg := n.receiveMsgWithTimeout(conn, 10*time.Second); rmsg != nil {
-                        n.updatePeerInfo(rmsg.Info)
-                        logid = rmsg.Info.LastLogId
-                        if n.getLastLogId() == logid {
-                            break;
-                        }
-                    } else {
-                        break
-                    }
                 } else {
-                    glog.Debugfln("data incremental replication from %s to %s failed, logid: %d, current: %d", n.getName(), info.Name, logid, n.getLastLogId())
-                    break
+                    return
                 }
+            } else {
+                glog.Debugfln("data incremental replication from %s to %s failed, logid: %d, current: %d", n.getName(), info.Name, logid, n.getLastLogId())
+                time.Sleep(time.Second)
+                return
             }
-        } else {
-            // @todo 必须要处理这种情况
-            glog.Debugfln("failed in data replication from %s to %s, invalid log id: %d, current: %d", n.getName(), info.Name, logid, n.getLastLogId())
         }
     }
 }
+
+// 根据一个非法的logid查找日志中对应的比其下的有效logid，以便做同步
+func (n *Node) getValidLogIdFromGreaterLogId(info *NodeInfo) int64 {
+    var result int64 = -1
+    logid := info.LastLogId
+    for {
+        list   := n.getLogEntriesByLastLogId(logid, 1000, false)
+        length := len(list)
+        if length > 0 {
+            // 需要把原始Logid附带过去，以便目标节点做对比
+            ids   := make([]int64, length + 1)
+            ids[0] = logid
+            for k, v := range list {
+                ids[k + 1] = v.Id
+            }
+            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_VALID_LOGID_CHECK, gjson.Encode(ids))
+            if err == nil && msg.Head == gMSG_REPL_RESPONSE {
+                if msg.Body != "" {
+                    r, err := strconv.ParseInt(msg.Body, 10, 64)
+                    if err == nil {
+                        return r
+                    } else {
+                        return result
+                    }
+                }
+            } else {
+                return result
+            }
+            logid = list[length - 1].Id
+        } else {
+            break
+        }
+    }
+    return result
+}
+
+// 两个节点对比有效logid
+func (n *Node) onMsgReplValidLogIdCheck(conn net.Conn, msg *Msg) {
+    var ids []int64
+    result := ""
+    if gjson.DecodeTo(msg.Body, &ids) == nil {
+        length := len(ids)
+        if length > 0 {
+            list := n.getLogEntriesByLastLogId(ids[0], length - 1, false)
+            if len(list) > 0 {
+                // 升序
+                for i, id := range ids {
+                    if i == 0 {
+                        continue
+                    }
+                    for _, v := range list {
+                        if id <= v.Id {
+                            result = strconv.FormatInt(v.Id, 10)
+                            break
+                        }
+                    }
+                    if result != "" {
+                        break
+                    }
+                }
+            } else {
+                result = "0"
+            }
+        }
+    }
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, result)
+}
+
 
 // 从目标节点同步Service数据
 // follower<-leader
@@ -304,7 +396,7 @@ func (n *Node) onMsgApiPeersRemove(conn net.Conn, msg *Msg) {
                 if ip == info.Ip {
                     glog.Printf("removing peer: %s, ip: %s\n", info.Name, info.Ip)
                     n.Peers.Remove(info.Id)
-                    break;
+                    break
                 }
             }
         }

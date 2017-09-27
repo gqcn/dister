@@ -50,6 +50,28 @@ func (n *Node) sendMsg(conn net.Conn, head int, body string) error {
     return Send(conn, s)
 }
 
+// 向指定节点发送并接收消息
+func (n *Node) sendAndReceiveMsgToNode(info *NodeInfo, port int, head int, body string) (*Msg, error) {
+    conn := n.getConn(info.Ip, port)
+    if conn != nil {
+        defer conn.Close()
+        err := n.sendMsg(conn, head, body)
+        if err != nil {
+            msg := n.receiveMsg(conn)
+            if msg != nil {
+                return msg, nil
+            } else {
+                return nil, errors.New(fmt.Sprintf("receive msg error from node: %s, sent msg head: %d", info.Ip, head))
+            }
+        } else {
+            return nil, err
+        }
+    } else {
+        return nil, errors.New(fmt.Sprintf("cannot connect to node: %s", info.Ip))
+    }
+    return nil, errors.New("error")
+}
+
 // 获得TCP链接
 func (n *Node) getConn(ip string, port int) net.Conn {
     conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, port), 3 * time.Second)
@@ -516,10 +538,6 @@ func (n *Node) getMinNode() int32 {
     return atomic.LoadInt32(&n.MinNode)
 }
 
-func (n *Node) getLastSavedLogId() int64 {
-    return atomic.LoadInt64(&n.LastSavedLogId)
-}
-
 func (n *Node) getLastServiceLogId() int64 {
     return atomic.LoadInt64(&n.LastServiceLogId)
 }
@@ -614,13 +632,11 @@ func (n *Node) setRole(role int32) {
 }
 
 func (n *Node) setRaftRole(role int32) {
-    n.mutex.Lock()
-    if n.RaftRole != role {
-        glog.Printf("role changed from %s to %s\n", raftRoleName(n.RaftRole), raftRoleName(role))
+    r := n.getRaftRole()
+    if r != role {
+        glog.Printfln("role changed from %s to %s", raftRoleName(r), raftRoleName(role))
     }
-    n.RaftRole = role
-    n.mutex.Unlock()
-
+    atomic.StoreInt32(&n.RaftRole, role)
 }
 
 func (n *Node) setLeader(info *NodeInfo) {
@@ -648,10 +664,6 @@ func (n *Node) SetSavePath(path string) {
 
 func (n *Node) setLastLogId(id int64) {
     atomic.StoreInt64(&n.LastLogId, id)
-}
-
-func (n *Node) setLastSavedLogId(id int64) {
-    atomic.StoreInt64(&n.LastSavedLogId, id)
 }
 
 func (n *Node) setLastServiceLogId(id int64) {
@@ -688,6 +700,11 @@ func (n *Node) setDataMap(m *gmap.StringStringMap) {
 // 更新节点信息
 func (n *Node) updatePeerInfo(info NodeInfo) {
     n.Peers.Set(info.Id, info)
+    // leader更新判断
+    leader := n.getLeader()
+    if leader != nil && leader.Id == info.Id {
+        n.setLeader(&info)
+    }
     // 去掉初始化时写入的IP键名记录
     if n.Peers.Contains(info.Ip) {
         if info.Id != info.Ip {
@@ -708,9 +725,7 @@ func (n *Node) updatePeerStatus(Id string, status int32) {
 // 更新选举截止时间
 // 改进：固定时间进行比分，看谁的比分更多
 func (n *Node) updateElectionDeadline() {
-    n.mutex.Lock()
-    n.ElectionDeadline = gtime.Millisecond() + gELECTION_TIMEOUT
-    n.mutex.Unlock()
+    atomic.StoreInt64(&n.ElectionDeadline, gtime.Millisecond() + gELECTION_TIMEOUT)
 }
 
 

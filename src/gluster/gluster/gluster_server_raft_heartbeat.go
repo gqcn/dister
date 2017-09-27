@@ -18,6 +18,7 @@ func (n *Node) heartbeatHandler() {
                 if conns.Contains(info.Id) {
                     continue
                 }
+                // 每个节点单独一个线程进行心跳处理
                 go func(id, ip string) {
                     conns.Add(id)
                     defer conns.Remove(id)
@@ -37,20 +38,18 @@ func (n *Node) heartbeatHandler() {
 
                     for {
                         // 如果当前节点不再是leader，或者节点表中已经删除该节点信息
-                        if n.getRaftRole() != gROLE_RAFT_LEADER || !n.Peers.Contains(id){
+                        if n.getRaftRole() != gROLE_RAFT_LEADER || !n.Peers.Contains(id) {
                             return
                         }
+                        // 发送心跳
                         if n.sendMsg(conn, gMSG_RAFT_HEARTBEAT, "") != nil {
                             n.updatePeerStatus(id, gSTATUS_DEAD)
                             return
                         }
+                        // 接收回复
                         msg := n.receiveMsg(conn)
-                        if msg == nil {
-                            n.updatePeerStatus(id, gSTATUS_DEAD)
-                            return
-                        } else {
+                        if msg != nil {
                             //glog.Println("receive heartbeat back from:", ip)
-                            // 更新节点信息
                             n.updatePeerInfo(msg.Info)
                             switch msg.Head {
                                 case gMSG_RAFT_I_AM_LEADER:
@@ -65,6 +64,9 @@ func (n *Node) heartbeatHandler() {
                                 default:
                                     time.Sleep(gELECTION_TIMEOUT_HEARTBEAT * time.Millisecond)
                             }
+                        } else {
+                            n.updatePeerStatus(id, gSTATUS_DEAD)
+                            return
                         }
                     }
                 }(info.Id, info.Ip)

@@ -29,7 +29,7 @@ import (
 
 const (
     gVERSION                                = "1.2"   // 当前版本
-    gDEBUG                                  = true    // 用于控制调试信息，开发阶段使用
+    gDEBUG                                  = false   // 用于控制调试信息，开发阶段使用
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
@@ -57,8 +57,8 @@ const (
     // 超时时间设置
     gTCP_RETRY_COUNT                        = 0       // TCP请求失败时的重试次数
     gTCP_READ_TIMEOUT                       = 6000    // (毫秒)TCP链接读取超时
-    gELECTION_TIMEOUT                       = 2000    // (毫秒)RAFT选举超时时间
-    gELECTION_TIMEOUT_HEARTBEAT             = 1000    // (毫秒)RAFT Leader统治维持心跳间隔
+    gELECTION_TIMEOUT                       = 3000    // (毫秒)RAFT选举超时时间
+    gELECTION_TIMEOUT_HEARTBEAT             = 500     // (毫秒)RAFT Leader统治维持心跳间隔
     gLOG_REPL_DATA_UPDATE_INTERVAL          = 100     // (毫秒)数据同步间隔
     gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 2000    // (毫秒)Service同步检测心跳间隔
     gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔
@@ -84,11 +84,12 @@ const (
     gMSG_REPL_DATA_SET                      = 300
     gMSG_REPL_DATA_REMOVE                   = 310
     gMSG_REPL_DATA_REPLICATION              = 320
-    gMSG_REPL_FAILED                        = 330
-    gMSG_REPL_RESPONSE                      = 340
-    gMSG_REPL_PEERS_UPDATE                  = 350
-    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 360
-    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 370
+    gMSG_REPL_VALID_LOGID_CHECK             = 330
+    gMSG_REPL_FAILED                        = 340
+    gMSG_REPL_RESPONSE                      = 350
+    gMSG_REPL_PEERS_UPDATE                  = 360
+    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 370
+    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 380
 
     // API相关
     gMSG_API_PEERS_ADD                      = 500
@@ -128,7 +129,6 @@ type Node struct {
 
     LogIdIndex           int64                    // 用于生成LogId的参考字段
     LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
-    LastSavedLogId       int64                    // 最后一次吴丽华保存log的id，用物理化存储判断
     LastServiceLogId     int64                    // 最后一次保存的service id号，用以识别service信息同步
     LogList              *glist.SafeList          // leader日志列表，用以数据同步
     SavePath             string                   // 物理存储的本地数据*目录*绝对路径
@@ -310,7 +310,6 @@ func Receive(conn net.Conn) []byte {
 
 // 发送数据
 func Send(conn net.Conn, data []byte) error {
-    //conn.SetReadDeadline(time.Now().Add(gTCP_WRITE_TIMEOUT * time.Millisecond))
     retry := 0
     for {
         if gCOMPRESS_COMMUNICATION {

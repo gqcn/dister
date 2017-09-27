@@ -122,64 +122,61 @@ func (n *Node) peersReplicationLoop() {
     }
 }
 
-// 根据logid获取还未更新的日志列表
+// 根据logid获取还未更新的日志列表，check参数表示首先必须要校验logid的有效性
 // 注意：为保证日志一致性，在进行日志更新时，需要查找到目标节点logid在本地日志中存在有**完整匹配**的logid日志，并将其后的日志列表返回
 // 如果出现leader的logid比follower大，并且获取不到更新的日志列表时，表示两者数据已经不一致，需要做完整的同步复制处理
 // 升序查找
-func (n *Node) getLogEntriesByLastLogId(id int64, max int) []LogEntry {
+func (n *Node) getLogEntriesByLastLogId(id int64, max int, check bool) []LogEntry {
     array := make([]LogEntry, 0)
-    if n.getLastLogId() > id {
-        // 首先从内存中获取，需要注意的是，
-        // 如果内存列表中最小的logid比请求的大，数据会有缺失，必须从磁盘中读取（一般不会出现，因为自动清理loglist是会判断所有节点同步完成后才会执行）
-        // 因此，内容列表中的logid必须包含请求的logid
-        if n.LogList.Len() > 0 {
-            match := false
-            if id == 0 {
-                match = true
-            }
-            l := n.LogList.Back()
-            if l != nil && l.Value.(*LogEntry).Id <= id {
-                for l != nil {
-                    if len(array) == max {
+    // 首先从内存中获取，需要注意的是，
+    // 如果内存列表中最小的logid比请求的大，数据会有缺失，必须从磁盘中读取（一般不会出现，因为自动清理loglist是会判断所有节点同步完成后才会执行）
+    // 因此，内容列表中的logid必须包含请求的logid
+    match := !check
+    if n.LogList.Len() > 0 {
+        if id == 0 {
+            match = true
+        }
+        l := n.LogList.Back()
+        if l != nil && l.Value.(*LogEntry).Id <= id {
+            for l != nil {
+                if len(array) == max {
+                    break;
+                }
+                r := l.Value.(*LogEntry)
+                if !match && r.Id == id {
+                    match = true
+                } else if r.Id > id {
+                    if match {
+                        array = append(array, *r)
+                    } else {
                         break;
                     }
-                    r := l.Value.(*LogEntry)
-                    if r.Id <= id {
-                        match = true
-                    } else {
-                        if match {
-                            array = append(array, *r)
-                        } else {
-                            break;
-                        }
-                    }
-                    l = l.Prev()
                 }
+                l = l.Prev()
             }
         }
-        // 如果当前内存中的数据不够，那么从文件中读取剩余数据
-        length := len(array)
-        if length < 1 || (length < max && array[length - 1].Id < id) {
-            left   := max - length
-            leftid := id
-            if length > 0 {
-                leftid = array[length - 1].Id
-            }
-            result := n.getLogEntryListFromFileByLogId(leftid, left)
-            if result != nil && len(result) > 0 {
-                array = append(array, result...)
-            }
-        }
-        return array
     }
-    return nil
+    // 如果当前内存中的数据不够，那么从文件中读取剩余数据
+    length := len(array)
+    if length < 1 || (length < max && array[length - 1].Id < id) {
+        left   := max - length
+        leftid := id
+        if length > 0 {
+            leftid = array[length - 1].Id
+        }
+        result := n.getLogEntryListFromFileByLogId(leftid, left, !match)
+        if result != nil && len(result) > 0 {
+            array = append(array, result...)
+        }
+    }
+    return array
 }
 
-// 从文件中获取指定logid之后max数量的数据
-func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
+// 从文件中获取指定logid之后max数量的数据，当max=0时获取指定id之后所有的LogEntry
+func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int, check bool) []LogEntry {
     // id仅用于计算文件路径
     id    := logid
-    match := false
+    match := !check
     if logid == 0 {
         match = true
     }
@@ -194,7 +191,7 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
             // 读取数据文件符合条件的数据
             buffer := bufio.NewReader(file)
             for {
-                if len(array) == max {
+                if max > 0 && len(array) == max {
                     return array
                 }
                 line, _, err := buffer.ReadLine()
@@ -225,7 +222,6 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
                             break;
                         }
                     }
-
                 } else {
                     if err == io.EOF {
                         break;
@@ -251,6 +247,9 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int) []LogEntry {
 // 由于在数据量比较大的情况下，会引起多次同步，因此必需判断给定的logid是否是一个合法的logid，以便后续进程能够保证同步是有效合理的
 // 升序查找
 func (n *Node) isValidLogId(id int64) bool {
+    if id == 0 {
+        return true
+    }
     lastLogId := n.getLastLogId()
     if lastLogId >= id {
         if lastLogId == id {
@@ -312,10 +311,6 @@ func (n *Node) autoCleanLogList() {
         minLogId := n.getMinLogIdFromPeers()
         if minLogId == 0 {
             continue
-        }
-        // 必须保证日志先保存完毕再清理
-        if minLogId > n.getLastSavedLogId() {
-            minLogId = n.getLastSavedLogId()
         }
         p := n.LogList.Back()
         for p != nil {

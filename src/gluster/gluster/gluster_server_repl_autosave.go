@@ -10,24 +10,11 @@ import (
     "g/os/glog"
     "g/encoding/gcompress"
     "sync"
-    "encoding/json"
     "g/os/gcache"
-    "fmt"
 )
 
 // 日志自动保存处理
 func (n *Node) autoSavingHandler() {
-    go func() {
-        // 初始化LastSavedId
-        n.setLastSavedLogId(n.getLastLogId())
-        for {
-            if n.getLastSavedLogId() != n.getLastLogId() {
-                n.saveLogList()
-            }
-            time.Sleep(gLOG_REPL_AUTOSAVE_INTERVAL * time.Millisecond)
-        }
-    }()
-
     lastLogId     := n.getLastLogId()
     lastServiceId := n.getLastServiceLogId()
     for {
@@ -40,37 +27,6 @@ func (n *Node) autoSavingHandler() {
             lastServiceId = n.getLastServiceLogId()
         }
         time.Sleep(gLOG_REPL_AUTOSAVE_INTERVAL * time.Millisecond)
-    }
-}
-
-// 定期物理化存储日志列表
-func (n *Node) saveLogList() {
-    // 构造数据集合
-    savedid := n.getLastSavedLogId()
-    lastid  := savedid
-    m := make(map[int][]byte)
-    p := n.LogList.Back()
-    for p != nil {
-        entry := p.Value.(*LogEntry)
-        if entry.Id > lastid {
-            items, err := json.Marshal(entry.Items)
-            if err != nil {
-                glog.Error("json marshal log entry error:", err)
-                break;
-            }
-            line   := fmt.Sprintf("%d,%d,%s\n", entry.Id, entry.Act, items)
-            n      := n.getLogEntryBatachNo(entry.Id)
-            m[n]    = append(m[n], line...)
-            savedid = entry.Id
-        }
-        p = p.Prev()
-    }
-    // 批量写入
-    if len(m) > 0 {
-        for k, v := range m {
-            gfile.PutBinContentsAppend(n.getLogEntryFileSavePathByBatchNo(k), v)
-        }
-        n.setLastSavedLogId(savedid)
     }
 }
 
@@ -150,13 +106,24 @@ func (n *Node) restoreDataMap() {
         }
         if bin != nil && len(bin) > 0 {
             //glog.Println("restore data from", path)
-            m := make(map[string]string)
-            j := gjson.DecodeToJson(string(bin))
-            n.setLastLogId(j.GetInt64("LastLogId"))
+            m  := make(map[string]string)
+            j  := gjson.DecodeToJson(string(bin))
+            id := j.GetInt64("LastLogId")
             if err := j.GetToVar("DataMap", &m); err == nil {
                 n.DataMap.BatchSet(m)
             } else {
                 glog.Error(err)
+            }
+            list := n.getLogEntryListFromFileByLogId(id, 0, false)
+            if len(list) > 0 {
+                logid := id
+                for _, v := range list {
+                    logid = v.Id
+                    n.saveLogEntryToVar(&v)
+                }
+                n.setLastLogId(logid)
+            } else {
+                n.setLastLogId(id)
             }
         }
     }

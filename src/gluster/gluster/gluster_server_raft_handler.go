@@ -55,9 +55,7 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
         n.setLeader(&msg.Info)
         n.setRaftRole(gROLE_RAFT_FOLLOWER)
     } else {
-        // 脑裂问题，集群节点规划或者网络异常造成，在集群正常运行中才有可能出现，选举中不会出现
-        // 1、两个leader无法相互通信，那么两个leader处于不同的两个网络，因此需要将其中一个网络中的该follower剔除掉，只保留其在一个网络中
-        // 2、两个leader可以相互通信，那么两个leader处于相同的网络，于是将两个leader相互比较，最终留下一个作为leader，另外一个作为follower
+        // 脑裂问题处理
         if n.getLeader().Id != msg.Info.Id {
             glog.Printf("split brains occurred, heartbeat from: %s, but my leader is: %s\n", msg.Info.Name, n.getLeader().Name)
             leaderConn := n.getConn(n.getLeader().Ip, gPORT_RAFT)
@@ -136,8 +134,8 @@ func (n *Node) onMsgRaftScoreCompareRequest(conn net.Conn, msg *Msg) {
         if n.compareLeaderWithRemoteNode(&msg.Info) {
             result = gMSG_RAFT_SCORE_COMPARE_FAILURE
         } else {
-            n.setLeader(&msg.Info)
-            n.setRaftRole(gROLE_RAFT_FOLLOWER)
+            // 只是更新选举超时时间，最终leader的确定靠首次leader心跳
+            n.updateElectionDeadline()
         }
     }
     n.sendMsg(conn, result, "")
