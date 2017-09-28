@@ -1,7 +1,6 @@
 # dister
-"dister"为Distribution Cluster的缩写
 ### dister的介绍
-dister是一款轻量级高性能的分布式集群管理软件，实现了分布式软件架构中的常用核心组件，包括：
+dister(Distribution Cluster)是一款轻量级高性能的分布式集群管理软件，实现了分布式软件架构中的常用核心组件，包括：
 1. 服务配置管理中心;
 2. 服务注册与发现;
 3. 服务健康检查;
