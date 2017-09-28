@@ -3,6 +3,7 @@ package gluster
 import (
     "net"
     "g/os/glog"
+    "g/encoding/gjson"
 )
 
 // 集群协议通信接口回调函数
@@ -22,6 +23,7 @@ func (n *Node) raftTcpHandler(conn net.Conn) {
         case gMSG_RAFT_HEARTBEAT:               n.onMsgRaftHeartbeat(conn, msg)
         case gMSG_RAFT_SCORE_REQUEST:           n.onMsgRaftScoreRequest(conn, msg)
         case gMSG_RAFT_SCORE_COMPARE_REQUEST:   n.onMsgRaftScoreCompareRequest(conn, msg)
+        case gMSG_RAFT_LEADER_COMPARE_REQUEST:  n.onMsgRaftLeaderCompareRequest(conn, msg)
         case gMSG_RAFT_SPLIT_BRAINS_CHECK:      n.onMsgRaftSplitBrainsCheck(conn, msg)
     }
     //这里不用自动关闭链接，由于链接有读取超时，当一段时间没有数据时会自动关闭
@@ -127,11 +129,12 @@ func (n *Node) onMsgRaftScoreRequest(conn net.Conn, msg *Msg) {
 // 选举比分对比
 // 注意：这里除了比分选举，还需要判断数据一致性的对比
 func (n *Node) onMsgRaftScoreCompareRequest(conn net.Conn, msg *Msg) {
+    j := gjson.DecodeToJson(msg.Body)
     result := gMSG_RAFT_SCORE_COMPARE_SUCCESS
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         result = gMSG_RAFT_I_AM_LEADER
     } else {
-        if n.compareLeaderWithRemoteNode(&msg.Info) {
+        if n.compareLeaderWithRemoteNodeByDetail(msg.Info.LastLogId, int32(j.GetInt("count")), j.GetInt64("score")) {
             result = gMSG_RAFT_SCORE_COMPARE_FAILURE
         } else {
             // 只是更新选举超时时间，最终leader的确定靠首次leader心跳
@@ -140,3 +143,15 @@ func (n *Node) onMsgRaftScoreCompareRequest(conn net.Conn, msg *Msg) {
     }
     n.sendMsg(conn, result, "")
 }
+
+// 两个leader进行比较
+func (n *Node) onMsgRaftLeaderCompareRequest(conn net.Conn, msg *Msg) {
+    j := gjson.DecodeToJson(msg.Body)
+    result := gMSG_RAFT_LEADER_COMPARE_SUCCESS
+    if n.compareLeaderWithRemoteNodeByDetail(msg.Info.LastLogId, int32(j.GetInt("count")), j.GetInt64("score")) {
+        result = gMSG_RAFT_LEADER_COMPARE_FAILURE
+    }
+    n.sendMsg(conn, result, "")
+}
+
+

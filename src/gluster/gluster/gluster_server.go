@@ -6,7 +6,6 @@ import (
     "g/net/gtcp"
     "net"
     "fmt"
-    "encoding/json"
     "g/util/gtime"
     "g/core/types/gmap"
     "g/os/gfile"
@@ -19,6 +18,8 @@ import (
     "errors"
     "g/util/grand"
     "sync/atomic"
+    "g/encoding/gbinary"
+    "strconv"
 )
 
 // 获取Msg，使用默认的超时时间
@@ -29,12 +30,26 @@ func (n *Node) receiveMsg(conn net.Conn) *Msg {
 // 获取Msg，自定义超时时间
 func (n *Node) receiveMsgWithTimeout(conn net.Conn, timeout time.Duration) *Msg {
     conn.SetReadDeadline(time.Now().Add(timeout))
-    return RecieveMsg(conn)
+    return n.doRecieveMsg(conn)
 }
 
 // 获取Msg，不超时
 func (n *Node) receiveMsgWithoutTimeout(conn net.Conn, timeout time.Duration) *Msg {
-    return RecieveMsg(conn)
+    return n.doRecieveMsg(conn)
+}
+
+// 获取Msg
+func (n *Node) doRecieveMsg(conn net.Conn) *Msg {
+    data := Receive(conn)
+    if data != nil && len(data) > 0 {
+        msg := n.decodeMsg(data)
+        if msg.Info.Ip == "127.0.0.1" || msg.Info.Ip == "" {
+            ip, _      := gip.ParseAddress(conn.RemoteAddr().String())
+            msg.Info.Ip = ip
+        }
+        return msg
+    }
+    return nil
 }
 
 // 发送Msg
@@ -42,12 +57,68 @@ func (n *Node) sendMsg(conn net.Conn, head int, body string) error {
     ip, _  := gip.ParseAddress(conn.LocalAddr().String())
     info   := n.getNodeInfo()
     info.Ip = ip
-    s, err := json.Marshal(Msg { head, body, *info })
-    if err != nil {
-        glog.Error("send msg parse err:", err)
-        return err
-    }
+    s, _ := n.encodeMsg(head, body, info)
     return Send(conn, s)
+}
+
+// 对Msg进行二进制打包
+func (n *Node) encodeMsg(head int, body string, info *NodeInfo) ([]byte, error) {
+    c       := []byte(body)
+    b1, err := gbinary.Encode(int32(head), int32(len(c)), c)
+    if err != nil {
+        glog.Error(err)
+        return nil, err
+    }
+    nameBytes  := []byte(info.Name)
+    groupBytes := []byte(info.Group)
+    id, _      := strconv.ParseUint(info.Id, 16, 32)
+    iplong     := gip.Ip2long(info.Ip)
+    b2, err    := gbinary.Encode(
+        int32(len(nameBytes)),  nameBytes,
+        int32(len(groupBytes)), groupBytes,
+        uint32(id), iplong, info.Role, info.RaftRole,
+        info.LastLogId, info.LastServiceLogId,
+        []byte(info.Version),
+    )
+    if err != nil {
+        glog.Error(err)
+        return nil, err
+    }
+    return append(b1, b2...), nil
+}
+
+// 对Msg进行二进制解包
+func (n *Node) decodeMsg(b []byte) *Msg {
+    head, _       := gbinary.DecodeToInt32 (b)
+    bodySize, _   := gbinary.DecodeToInt32 (b[4:])
+    bodyBytes, _  := gbinary.DecodeToBytes (b[8:], bodySize)
+    nameSize, _   := gbinary.DecodeToInt32 (b[8 + bodySize:])
+    nameBytes, _  := gbinary.DecodeToBytes (b[8 + bodySize + 4:], nameSize)
+    groupSize, _  := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize:])
+    groupBytes, _ := gbinary.DecodeToBytes (b[8 + bodySize + 4 + nameSize + 4:], groupSize)
+    id, _         := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize:])
+    iplong, _     := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize + 4:])
+    role, _       := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 8:])
+    raft, _       := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 12:])
+    logid, _      := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 16:])
+    sid, _        := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 24:])
+    version       := b[8 + bodySize + 4 + nameSize + 4 + groupSize + 32:]
+    return &Msg {
+        Head: int(head),
+        Body: string(bodyBytes),
+        Info: NodeInfo{
+            Name             : string(nameBytes),
+            Group            : string(groupBytes),
+            Id               : strings.ToUpper(fmt.Sprintf("%x", id)),
+            Ip               : gip.Long2ip(iplong),
+            Status           : gSTATUS_ALIVE,
+            Role             : role,
+            RaftRole         : raft,
+            LastLogId        : logid,
+            LastServiceLogId : sid,
+            Version          : string(version),
+        },
+    }
 }
 
 // 向指定节点发送并接收消息
@@ -352,8 +423,6 @@ func (n *Node) getNodeInfo() *NodeInfo {
         Status           : gSTATUS_ALIVE,
         Role             : n.Role,
         RaftRole         : n.getRaftRole(),
-        Score            : n.getScore(),
-        ScoreCount       : n.getScoreCount(),
         LastLogId        : n.getLastLogId(),
         LastServiceLogId : n.getLastServiceLogId(),
         Version          : gVERSION,
@@ -432,16 +501,32 @@ func (n *Node) sayHiToLocalLan() {
 // 与远程节点对比谁可以成为leader，返回true表示自己，false表示对方节点
 // 需要同时对比日志信息及选举比分
 func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
+    result      := true
+    compareData := gjson.Encode(map[string]interface{}{
+        "score": n.getScore(),
+        "count": n.getScoreCount(),
+    })
+    msg, err := n.sendAndReceiveMsgToNode(info, gPORT_RAFT, gMSG_RAFT_LEADER_COMPARE_REQUEST, compareData)
+    if err == nil {
+        if msg.Head == gMSG_RAFT_LEADER_COMPARE_FAILURE {
+            result = false
+        }
+    }
+    return result
+}
+
+// 使用具体对比信息进行对比
+func (n *Node) compareLeaderWithRemoteNodeByDetail(logid int64, count int32, score int64) bool {
     result := false
-    if n.getLastLogId() > info.LastLogId {
+    if n.getLastLogId() > logid {
         result = true
-    } else if n.getLastLogId() == info.LastLogId {
-        if n.getScoreCount() > info.ScoreCount {
+    } else if n.getLastLogId() == logid {
+        if n.getScoreCount() > count {
             result = true
-        } else if n.getScoreCount() == info.ScoreCount {
-            if n.getScore() > info.Score {
+        } else if n.getScoreCount() == count {
+            if n.getScore() > score {
                 result = true
-            } else if n.getScore() == info.Score {
+            } else if n.getScore() == score {
                 // 极少数情况, 这时避让策略
                 // 同样条件，最后请求的被选举为leader
                 result = true

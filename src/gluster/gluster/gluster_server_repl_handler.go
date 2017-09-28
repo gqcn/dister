@@ -20,14 +20,14 @@ func (n *Node) replTcpHandler(conn net.Conn) {
     msg := n.receiveMsg(conn)
     // 判断集群基础信息
     if msg == nil || msg.Info.Group != n.Group  || msg.Info.Version != gVERSION {
-        //glog.Println("receive nil, auto close conn")
+        //glog.Debug("receive nil, auto close conn")
         conn.Close()
         return
     }
     // 判断集群权限，只有本集群的节点之间才能进行数据通信(判断id)
     leader := n.getLeader()
     if leader == nil || (leader.Id != msg.Info.Id && !n.Peers.Contains(msg.Info.Id)) {
-        //glog.Printf("invalid peer, id: %s, name: %s\n", msg.Info.Id, msg.Info.Name)
+        glog.Debugfln("invalid peer, id: %s, name: %s", msg.Info.Id, msg.Info.Name)
         conn.Close()
         return
     }
@@ -186,15 +186,15 @@ func (n *Node) saveLogEntryToFile(entry *LogEntry) {
 // 保存LogEntry到内存变量
 func (n *Node) saveLogEntryToVar(entry *LogEntry) {
     switch entry.Act {
-        case gMSG_REPL_DATA_SET:
-            for k, v := range entry.Items.(map[string]interface{}) {
-                n.DataMap.Set(k, v.(string))
-            }
+    case gMSG_REPL_DATA_SET:
+        for k, v := range entry.Items.(map[string]interface{}) {
+            n.DataMap.Set(k, v.(string))
+        }
 
-        case gMSG_REPL_DATA_REMOVE:
-            for _, v := range entry.Items.([]interface{}) {
-                n.DataMap.Remove(v.(string))
-            }
+    case gMSG_REPL_DATA_REMOVE:
+        for _, v := range entry.Items.([]interface{}) {
+            n.DataMap.Remove(v.(string))
+        }
     }
 }
 

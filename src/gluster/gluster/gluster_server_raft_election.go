@@ -5,6 +5,7 @@ import (
     "time"
     "g/util/gtime"
     "g/os/glog"
+    "g/encoding/gjson"
 )
 
 // 服务器节点选举
@@ -105,6 +106,10 @@ func (n *Node) beginScore() {
     }
 
     // 执行比分，对比比分数据，选举出leader
+    compareData := gjson.Encode(map[string]interface{}{
+        "score": n.getScore(),
+        "count": n.getScoreCount(),
+    })
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {
@@ -122,7 +127,8 @@ func (n *Node) beginScore() {
                 return
             }
             defer conn.Close()
-            if err := n.sendMsg(conn, gMSG_RAFT_SCORE_COMPARE_REQUEST, ""); err != nil {
+
+            if err := n.sendMsg(conn, gMSG_RAFT_SCORE_COMPARE_REQUEST, compareData); err != nil {
                 glog.Error(err)
                 return
             }

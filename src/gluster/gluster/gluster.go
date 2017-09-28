@@ -17,14 +17,14 @@ import (
     "g/os/glog"
     "g/os/gfile"
     "net"
-    "encoding/json"
     "time"
     "io"
     "g/net/gip"
     "strings"
-    "g/encoding/gmd5"
     "g/encoding/gcompress"
     "g/os/gconsole"
+    "g/encoding/gcrc32"
+    "fmt"
 )
 
 const (
@@ -79,6 +79,9 @@ const (
     gMSG_RAFT_SCORE_COMPARE_REQUEST         = 200
     gMSG_RAFT_SCORE_COMPARE_FAILURE         = 210
     gMSG_RAFT_SCORE_COMPARE_SUCCESS         = 220
+    gMSG_RAFT_LEADER_COMPARE_REQUEST        = 230
+    gMSG_RAFT_LEADER_COMPARE_FAILURE        = 240
+    gMSG_RAFT_LEADER_COMPARE_SUCCESS        = 250
 
     // 数据同步操作
     gMSG_REPL_DATA_SET                      = 300
@@ -89,7 +92,9 @@ const (
     gMSG_REPL_RESPONSE                      = 350
     gMSG_REPL_PEERS_UPDATE                  = 360
     gMSG_REPL_CONFIG_FROM_FOLLOWER          = 370
-    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 380
+    gMSG_REPL_SERVICE_SET                   = 380
+    gMSG_REPL_SERVICE_REMOVE                = 390
+    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 400
 
     // API相关
     gMSG_API_PEERS_ADD                      = 500
@@ -129,20 +134,21 @@ type Node struct {
 
     LogIdIndex           int64                    // 用于生成LogId的参考字段
     LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
-    LastServiceLogId     int64                    // 最后一次保存的service id号，用以识别service信息同步
+    LastServiceLogId     int64                    // 最后一次保存的service id号，用以识别本地Service数据是否已更新，不做Leader与Follower的同步数据
     LogList              *glist.SafeList          // leader日志列表，用以数据同步
+    ServiceList          *glist.SafeList          // Service同步事件列表，用以Service同步
     SavePath             string                   // 物理存储的本地数据*目录*绝对路径
     Service              *gmap.StringInterfaceMap // 存储的服务配置表
     DataMap              *gmap.StringStringMap    // 存储的K-V哈希表
 }
 
-// 服务节点对象
+// 服务节点对象(用于程序更新及检索结构)
 type Service struct {
     Type  string                   `json:"type"`
     Node  map[string]interface{}   `json:"node"`
 }
 
-// 服务信息配置对象
+// 服务信息配置对象(用于配置结构)
 type ServiceConfig struct {
     Name  string                   `json:"name"`
     Type  string                   `json:"type"`
@@ -180,19 +186,16 @@ type MonitorWebUI struct {
 }
 
 // 节点信息
-// @todo 通信内容可以进一步进行简化
 type NodeInfo struct {
+    Name             string `json:"name"`
     Group            string `json:"group"`
     Id               string `json:"id"`
-    Name             string `json:"name"`
     Ip               string `json:"ip"`
     Status           int32  `json:"status"`
     Role             int32  `json:"role"`
-    RaftRole         int32  `json:"rrole"`
-    Score            int64  `json:"score"`
-    ScoreCount       int32  `json:"scount"`
+    RaftRole         int32  `json:"raft"`
     LastLogId        int64  `json:"logid"`
-    LastServiceLogId int64  `json:"slogid"`
+    LastServiceLogId int64  `json:"serviceid"`
     Version          string `json:"version"`
 }
 
@@ -224,6 +227,7 @@ func NewServer() *Node {
         Peers               : gmap.NewStringInterfaceMap(),
         SavePath            : gfile.SelfDir(),
         LogList             : glist.NewSafeList(),
+        ServiceList         : glist.NewSafeList(),
         Service             : gmap.NewStringInterfaceMap(),
         DataMap             : gmap.NewStringStringMap(),
     }
@@ -268,7 +272,7 @@ func nodeId() string {
     if mac == "" {
         glog.Fatalln("getting local MAC address failed")
     }
-    return strings.ToUpper(gmd5.EncodeString(mac))
+    return strings.ToUpper(fmt.Sprintf("%x", gcrc32.EncodeString(mac)))
 }
 
 // 获取数据
@@ -313,7 +317,10 @@ func Send(conn net.Conn, data []byte) error {
     retry := 0
     for {
         if gCOMPRESS_COMMUNICATION {
+            //size1 := len(data)
             data = gcompress.Zlib(data)
+            //size2 := len(data)
+            //glog.Debugfln("send size compressed from %d to %d", size1, size2)
         }
         _, err := conn.Write(data)
         if err != nil {
@@ -326,39 +333,6 @@ func Send(conn net.Conn, data []byte) error {
             return nil
         }
     }
-}
-
-// 获取Msg
-func RecieveMsg(conn net.Conn) *Msg {
-    data := Receive(conn)
-    if data != nil && len(data) > 0 {
-        var msg Msg
-        err := json.Unmarshal(data, &msg)
-        if err != nil {
-            glog.Error("receive msg parse err:", err)
-            return nil
-        }
-        if msg.Info.Ip == "127.0.0.1" || msg.Info.Ip == "" {
-            ip, _      := gip.ParseAddress(conn.RemoteAddr().String())
-            msg.Info.Ip = ip
-        }
-        return &msg
-    }
-    return nil
-}
-
-// 发送Msg
-func SendMsg(conn net.Conn, head int, body string) error {
-    var msg = Msg{
-        Head : head,
-        Body : body,
-    }
-    s, err := json.Marshal(msg)
-    if err != nil {
-        glog.Error("send msg parse err:", err)
-        return err
-    }
-    return Send(conn, s)
 }
 
 // 将集群角色字段转换为可读的字符串

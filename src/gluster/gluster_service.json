@@ -17,7 +17,7 @@
         ]
     },
     {
-        "name" : "homesite",
+        "name" : "sites",
         "type" : "web",
         "node" : [
             {"url": "http://192.168.2.15:80/health.php",   "interval" : "5000", "priority": "100"},
