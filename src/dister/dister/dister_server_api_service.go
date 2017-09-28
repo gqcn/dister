@@ -1,4 +1,4 @@
-package gluster
+package dister
 
 import (
     "g/net/ghttp"

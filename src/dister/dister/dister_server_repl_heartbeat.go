@@ -1,7 +1,7 @@
 // 数据同步需要注意的是：
 // leader只有在通知完所有follower更新完数据之后，自身才会进行数据更新
 // 因此leader
-package gluster
+package dister
 
 import (
     "g/encoding/gjson"
@@ -80,7 +80,7 @@ func (n *Node) serviceReplicationLoop() {
                     continue
                 }
                 go func(info *NodeInfo) {
-                    key  := fmt.Sprintf("gluster_service_replication_%s", info.Id)
+                    key  := fmt.Sprintf("dister_service_replication_%s", info.Id)
                     if gcache.Get(key) != nil {
                         return
                     }

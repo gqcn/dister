@@ -1,4 +1,4 @@
-package gluster
+package dister
 
 import (
     "g/net/ghttp"
@@ -21,7 +21,7 @@ func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
     if name == "" {
         w.ResponseJson(0, "incomplete input: name is required", nil)
     } else {
-        key    := fmt.Sprintf("gluster_service_balance_name_%s_%v", name, this.node.getLastServiceLogId())
+        key    := fmt.Sprintf("dister_service_balance_name_%s_%v", name, this.node.getLastServiceLogId())
         result := gcache.Get(key)
         if result == nil {
             r, err := this.getAliveServiceByPriority(name)

@@ -1,6 +1,6 @@
 // 数据同步需要注意的是，必须在节点完成election选举之后才能进行数据通信。
 // 也就是说repl通信需要建立在raft成功作为前提
-package gluster
+package dister
 
 import (
     "net"

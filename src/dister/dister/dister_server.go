@@ -1,4 +1,4 @@
-package gluster
+package dister
 
 import (
     "time"
@@ -171,7 +171,7 @@ func (n *Node) Run() {
     n.restoreFromFile()
 
     // 显示当前节点信息
-    fmt.Printf( "gluster version %s, start running...\n", gVERSION)
+    fmt.Printf( "dister version %s, start running...\n", gVERSION)
     fmt.Println("==================================================================================")
     fmt.Println("Host Id         :", n.Id)
     fmt.Println("Host Role       :", roleName(n.Role))
@@ -275,10 +275,10 @@ func (n *Node) initFromCommand() {
 // 从配置文件读取配置文件内容
 func (n *Node) initFromCfg() {
     // 获取命令行指定的配置文件路径，如果不存在，那么使用默认路径的配置文件
-    // 默认路径为gcluster执行文件的同一目录下的gluster.json文件
+    // 默认路径为gcluster执行文件的同一目录下的dister.json文件
     cfgpath := gconsole.Option.Get("cfg")
     if cfgpath == "" {
-        cfgpath = gfile.SelfDir() + gfile.Separator + "gluster.json"
+        cfgpath = gfile.SelfDir() + gfile.Separator + "dister.json"
     } else {
         if !gfile.Exists(cfgpath) {
             glog.Error(cfgpath, "does not exist")
@@ -355,7 +355,7 @@ func (n *Node) setSavePathFromConfig(savepath string) {
     if !gfile.IsWritable(savepath) {
         glog.Fatalln(savepath, "is not writable for saving data")
     }
-    dbpath := strings.TrimRight(savepath, gfile.Separator) + gfile.Separator + "gluster.db"
+    dbpath := strings.TrimRight(savepath, gfile.Separator) + gfile.Separator + "dister.db"
     if !gfile.Exists(dbpath) {
         gfile.Mkdir(dbpath)
     }
@@ -633,21 +633,21 @@ func (n *Node) getElectionDeadline() int64 {
 
 func (n *Node) getPeersFilePath() string {
     n.mutex.RLock()
-    path := n.SavePath + gfile.Separator + "gluster.peers.db"
+    path := n.SavePath + gfile.Separator + "dister.peers.db"
     n.mutex.RUnlock()
     return path
 }
 
 func (n *Node) getDataFilePath() string {
     n.mutex.RLock()
-    path := n.SavePath + gfile.Separator + "gluster.data.db"
+    path := n.SavePath + gfile.Separator + "dister.data.db"
     n.mutex.RUnlock()
     return path
 }
 
 func (n *Node) getServiceFilePath() string {
     n.mutex.RLock()
-    path := n.SavePath + gfile.Separator + "gluster.service.db"
+    path := n.SavePath + gfile.Separator + "dister.service.db"
     n.mutex.RUnlock()
     return path
 }
@@ -660,7 +660,7 @@ func (n *Node) getLogEntryFileSavePathById(id int64) string {
 // 根据批次号获取日志文件存储绝对路径
 func (n *Node) getLogEntryFileSavePathByBatchNo(no int) string {
     n.mutex.RLock()
-    path := n.SavePath + gfile.Separator + fmt.Sprintf("gluster.entry.%d.db", no)
+    path := n.SavePath + gfile.Separator + fmt.Sprintf("dister.entry.%d.db", no)
     n.mutex.RUnlock()
     return path
 }

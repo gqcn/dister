@@ -6,11 +6,11 @@
 package main
 
 import (
-    "gluster/gluster"
+    "dister/dister"
 )
 
 func main() {
-    server := gluster.NewServer()
+    server := dister.NewServer()
     server.Run()
 
     select { }

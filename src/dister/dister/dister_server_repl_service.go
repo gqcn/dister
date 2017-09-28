@@ -1,4 +1,4 @@
-package gluster
+package dister
 
 import (
     "time"
@@ -22,13 +22,13 @@ var sApiMutex sync.RWMutex
 
 // 用于API访问，将Service转换为API方便查询的结构，并缓存
 func (n *Node) getServiceMap() *map[string]ServiceConfig {
-    key := fmt.Sprintf("gluster_service_map_for_api_%v", n.getLastServiceLogId())
+    key := fmt.Sprintf("dister_service_map_for_api_%v", n.getLastServiceLogId())
     r   := gcache.Get(key)
     if r == nil {
         sApiMutex.Lock()
         defer sApiMutex.Unlock()
         m      := make(map[string]ServiceConfig)
-        reg, _ := regexp.Compile(`^(\d+)\.(\w+)\.service\.gluster$`)
+        reg, _ := regexp.Compile(`^(\d+)\.(\w+)\.service\.dister$`)
         for k, v := range *n.Service.Clone() {
             match := reg.FindStringSubmatch(k)
             if match != nil {
@@ -59,7 +59,7 @@ func (n *Node) getServiceMap() *map[string]ServiceConfig {
 
 // 用于API访问，查询所有Service配置
 func (n *Node) getServiceMapForApi() interface{} {
-    key    := fmt.Sprintf("gluster_service_map_value_for_api_%v", n.getLastServiceLogId())
+    key    := fmt.Sprintf("dister_service_map_value_for_api_%v", n.getLastServiceLogId())
     result := gcache.Get(key)
     if result == nil {
         m := n.getServiceMap()
@@ -74,7 +74,7 @@ func (n *Node) getServiceMapForApi() interface{} {
 
 // 用于API访问，查询单条Service配置，返回值为interface{}是为了API端处理方便
 func (n *Node) getServiceForApiByName(name string) interface{} {
-    key    := fmt.Sprintf("gluster_service_for_api_by_name_%s_%v", name, n.getLastServiceLogId())
+    key    := fmt.Sprintf("dister_service_for_api_by_name_%s_%v", name, n.getLastServiceLogId())
     result := gcache.Get(key)
     if result == nil {
         m := n.getServiceMap()
@@ -94,7 +94,7 @@ func (n *Node) getServiceForApiByName(name string) interface{} {
 // 获取用于健康检查的所有Service
 // 这里使用缓存降低Service.Clone压力，提高执行效率
 func (n *Node) getServiceListForCheck() map[string]Service {
-    key := fmt.Sprintf("gluster_service_list_for_check_%v", n.getLastServiceLogId())
+    key := fmt.Sprintf("dister_service_list_for_check_%v", n.getLastServiceLogId())
     m   := make(map[string]Service)
     r   := gcache.Get(key)
     if r == nil {
@@ -141,7 +141,7 @@ func (n *Node) serviceHealthCheckHandler() {
 // 服务健康检测
 // 如果新增检测类型，需要更新该方法
 func (n *Node) checkServiceHealth(skey string, node Service) {
-    checkingKey := "gluster_service_node_checking_" + skey
+    checkingKey := "dister_service_node_checking_" + skey
     if gcache.Get(checkingKey) != nil {
         return
     }
@@ -284,5 +284,5 @@ func (n *Node) customHealthCheck(node *Service) error {
 
 // 根据服务的分组名称和节点索引生成对应的服务唯一键名
 func (n *Node) getServiceKeyByNameAndIndex(name string, index int) string {
-    return fmt.Sprintf("%d.%s.service.gluster", index, name)
+    return fmt.Sprintf("%d.%s.service.dister", index, name)
 }

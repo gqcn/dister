@@ -6,7 +6,7 @@
         以上需要解决的是数据一致性问题，解决方案：检测集群各节点需要相互能够连通，剔除不连通的节点（例如星型拓扑结构的节点）
  */
 
-package gluster
+package dister
 
 import (
     "os"
@@ -130,7 +130,7 @@ type Node struct {
     Score                int64                    // 选举比分
     ScoreCount           int32                    // 选举比分的节点数
     ElectionDeadline     int64                    // 选举超时时间点
-    AutoScan             bool                     // 启动时自动扫描局域网，添加gluster节点
+    AutoScan             bool                     // 启动时自动扫描局域网，添加dister节点
 
     LogIdIndex           int64                    // 用于生成LogId的参考字段
     LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
@@ -218,7 +218,7 @@ func NewServer() *Node {
         Id                  : nodeId(),
         Ip                  : "127.0.0.1",
         Name                : hostname,
-        Group               : "default.group.gluster",
+        Group               : "default.group.dister",
         Role                : gROLE_SERVER,
         RaftRole            : gROLE_RAFT_FOLLOWER,
         Leader              : nil,
