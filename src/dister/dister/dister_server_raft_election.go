@@ -28,18 +28,16 @@ func (n *Node) electionHandler() {
                 }
             } else {
                 //glog.Println("no meet the least nodes count:", n.MinNode, ", current:", n.Peers.Size() + 1)
-                time.Sleep(100 * time.Millisecond)
-                continue
             }
         }
-        n.updateElectionDeadline()
+        time.Sleep(500 * time.Millisecond)
     }
 }
 
 // 改进的RAFT选举
 func (n *Node) beginScore() {
     var wg sync.WaitGroup
-    //glog.Println("new election...")
+    glog.Debug("new election...")
     // 请求比分，获取比分数据
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)

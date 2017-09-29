@@ -50,7 +50,7 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
         }
     } else if n.getLeader() == nil {
         if n.getLastLogId() > msg.Info.LastLogId {
-            // 不返回heartbeat消息，以便引起选举无法进行
+            // 不返回heartbeat消息，以便引起本节点选举无法进行
             result = gMSG_RAFT_RESPONSE
         } else {
             // 如果没有leader，并且目标节点满足成为本节点leader的条件，那么设置目标节点为leader
@@ -80,6 +80,7 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
                 leaderConn.Close()
             } else {
                 // 如果leader连接不上，那么表示leader已经死掉，替换为新的leader
+                glog.Printfln("could not connect to leader:%s, so set new leader:%s", n.getLeader().Name, msg.Info.Name)
                 n.setLeader(&msg.Info)
             }
         }

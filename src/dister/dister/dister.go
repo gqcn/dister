@@ -29,7 +29,7 @@ import (
 
 const (
     gVERSION                                = "1.2"   // 当前版本
-    gDEBUG                                  = true    // 用于控制调试信息，开发阶段使用
+    gDEBUG                                  = false   // 用于控制调试信息，开发阶段使用
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
@@ -57,11 +57,11 @@ const (
     // 超时时间设置
     gTCP_RETRY_COUNT                        = 0       // TCP请求失败时的重试次数
     gTCP_READ_TIMEOUT                       = 6000    // (毫秒)TCP链接读取超时
-    gELECTION_TIMEOUT                       = 3000    // (毫秒)RAFT选举超时时间
+    gELECTION_TIMEOUT                       = 2000    // (毫秒)RAFT选举超时时间(如果Leader挂掉之后到重新选举的时间间隔)
     gELECTION_TIMEOUT_HEARTBEAT             = 500     // (毫秒)RAFT Leader统治维持心跳间隔
     gLOG_REPL_DATA_UPDATE_INTERVAL          = 1000    // (毫秒)数据同步间隔
     gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 2000    // (毫秒)Service同步检测心跳间隔
-    gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔
+    gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔(更新时会做更新判断)
     gLOG_REPL_LOGCLEAN_INTERVAL             = 2000    // (毫秒)LogList定期清理过期(已同步)的日志列表
     gLOG_REPL_PEERS_INTERVAL                = 2000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL          = 2000    // (毫秒)健康检查默认间隔

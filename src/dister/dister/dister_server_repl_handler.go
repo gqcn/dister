@@ -77,6 +77,9 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     } else {
         result = gMSG_REPL_FAILED
     }
+    if result == gMSG_REPL_FAILED {
+        glog.Debugfln("data set failed, msg: %s", msg.Body)
+    }
     n.sendMsg(conn, result, "")
 }
 
@@ -258,7 +261,7 @@ func (n *Node) onMsgReplDataRemove(conn net.Conn, msg *Msg) {
 // 保存日志数据
 func (n *Node) saveLogEntry(entry *LogEntry) {
     lastLogId := n.getLastLogId()
-    if entry.Id < lastLogId {
+    if entry.Id <= lastLogId {
         // 在高并发下，有可能会出现这种情况，提出警告
         glog.Errorfln("expired log entry, received:%d, current:%d", entry.Id, lastLogId)
         return
@@ -311,6 +314,7 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
         length := len(array)
         //glog.Debugfln("receive data replication update from: %s, start logid: %d, end logid: %d, size: %d", msg.Info.Name, array[0].Id, array[len(array)-1].Id, length)
         if array != nil && length > 0 {
+            n.dmutex.Lock()
             for _, v := range array {
                 if v.Id > n.getLastLogId() {
                     entry := v
@@ -318,6 +322,7 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
                     n.saveLogEntry(&entry)
                 }
             }
+            n.dmutex.Unlock()
         }
     }
 }
@@ -341,7 +346,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
             list   := n.getLogEntriesByLastLogId(logid, 10000, false)
             length := len(list)
             if length > 0 {
-                glog.Debugfln("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d", n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
+                //glog.Debugfln("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d", n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
                 if err := n.sendMsg(conn, gMSG_REPL_DATA_REPLICATION, gjson.Encode(list)); err != nil {
                     glog.Error(err)
                     time.Sleep(time.Second)
