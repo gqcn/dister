@@ -13,6 +13,8 @@ import (
     "g/core/types/gset"
     "strconv"
     "g/os/gfile"
+    "sync/atomic"
+    "g/os/gcache"
 )
 
 // 集群数据同步接口回调函数
@@ -34,10 +36,11 @@ func (n *Node) replTcpHandler(conn net.Conn) {
     switch msg.Head {
         case gMSG_REPL_DATA_SET:                    n.onMsgReplDataSet(conn, msg)
         case gMSG_REPL_DATA_REMOVE:                 n.onMsgReplDataRemove(conn, msg)
+        case gMSG_REPL_DATA_APPENDENTRY:            n.onMsgReplDataAppendEntry(conn, msg)
+        case gMSG_REPL_DATA_REPLICATION:            n.onMsgReplDataReplication(conn, msg)
         case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
         case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
-        case gMSG_REPL_DATA_REPLICATION:            n.onMsgReplDataReplication(conn, msg)
         case gMSG_REPL_VALID_LOGID_CHECK:           n.onMsgReplValidLogIdCheck(conn, msg)
         case gMSG_REPL_CONFIG_FROM_FOLLOWER:        n.onMsgConfigFromFollower(conn, msg)
         case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:   n.onMsgServiceCompletelyUpdate(conn, msg)
@@ -61,8 +64,12 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
                 Act   : msg.Head,
                 Items : items,
             }
-            n.LogList.PushFront(&entry)
-            n.saveLogEntry(&entry)
+            if n.sendLogEntryToPeers(&entry) {
+                n.LogList.PushFront(&entry)
+                n.saveLogEntry(&entry)
+            } else {
+                result = gMSG_REPL_FAILED
+            }
         } else {
             result = gMSG_REPL_FAILED
         }
@@ -71,6 +78,97 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
         result = gMSG_REPL_FAILED
     }
     n.sendMsg(conn, result, "")
+}
+
+// 当Leader获取数据写入时，直接写入数据请求
+// 这里去掉了RAFT的Uncommtted LogEntry流程，算是一个优化，为提高写入性能与保证数据一致性的一个折中方案
+// 因此建议客户端在请求失败时应当需要有重试机制
+func (n *Node) onMsgReplDataAppendEntry(conn net.Conn, msg *Msg) {
+    result := gMSG_REPL_RESPONSE
+    var entry LogEntry
+    // 这里必须要保证节点当前的数据是和leader同步的，才能执行新的数据写入
+    err := gjson.DecodeTo(msg.Body, &entry)
+    if msg.Info.LastLogId == n.getLastLogId() && n.getRaftRole() != gROLE_RAFT_LEADER && err == nil {
+        n.dmutex.Lock()
+        n.LogList.PushFront(&entry)
+        n.saveLogEntry(&entry)
+        n.dmutex.Unlock()
+    } else {
+        result = gMSG_REPL_FAILED
+    }
+    n.sendMsg(conn, result, "")
+}
+
+// 发送数据操作到其他节点，保证有另外一个server节点成功，那么该请求便成功
+// 这里只处理server节点，client节点通过另外的数据同步线程进行数据同步
+func (n *Node) sendLogEntryToPeers(entry *LogEntry) bool {
+    // 只有一个leader节点，并且配置是允许单节点运行
+    if n.Peers.Size() < 1 && n.getMinNode() == 1 {
+        if n.getMinNode() == 1 {
+            return true
+        } else {
+            return false
+        }
+    }
+    // 获取Server节点列表
+    list  := n.getAliveServerNodes()
+    total := int32(len(list))
+    if total == 0 {
+        return true
+    }
+
+    var doneCount int32 = 0 // 成功的请求数
+    var failCount int32 = 0 // 失败的请求数
+    result   := true
+    entrystr := gjson.Encode(*entry)
+    for _, v := range list {
+        info := v
+        go func(info *NodeInfo, entrystr string) {
+            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_DATA_APPENDENTRY, entrystr)
+            if err == nil && (msg != nil && msg.Head == gMSG_REPL_RESPONSE) {
+                atomic.AddInt32(&doneCount, 1)
+            } else {
+                atomic.AddInt32(&failCount, 1)
+            }
+        }(&info, entrystr)
+    }
+    // 等待执行结束，超时时间60秒
+    timeout := gtime.Second() + 60
+    for {
+        if atomic.LoadInt32(&doneCount) > 0 {
+            result = true
+            break;
+        } else if atomic.LoadInt32(&failCount) == total {
+            result = false
+            break;
+        } else if gtime.Second() >= timeout {
+            result = false
+            break;
+        }
+        time.Sleep(10 * time.Microsecond)
+    }
+    //glog.Debugfln("success count:%d, failed count:%d, total count:%d", atomic.LoadInt32(&doneCount), atomic.LoadInt32(&failCount), total)
+    return result
+}
+
+// 获取存货的节点数，并做缓存处理，以提高读取效率
+func (n *Node) getAliveServerNodes() []NodeInfo {
+    key    := "dister_cached_server_nodes"
+    result := gcache.Get(key)
+    if result != nil {
+        return result.([]NodeInfo)
+    } else {
+        list := make([]NodeInfo, 0)
+        for _, v := range n.Peers.Values() {
+            info := v.(NodeInfo)
+            if info.Status != gSTATUS_ALIVE || info.Role != gROLE_SERVER {
+                continue
+            }
+            list = append(list, info)
+        }
+        gcache.Set(key, list, 1000)
+        return list
+    }
 }
 
 // Follower->Leader的配置同步
@@ -86,11 +184,7 @@ func (n *Node) onMsgConfigFromFollower(conn net.Conn, msg *Msg) {
                 if ip == n.Ip || n.Peers.Contains(ip) {
                     continue
                 }
-                go func(ip string) {
-                    if !n.sayHi(ip) {
-                        n.updatePeerInfo(NodeInfo{Id: ip, Ip: ip})
-                    }
-                }(ip)
+                go n.sayHi(ip)
             }
         }
     }
@@ -215,7 +309,7 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
             return
         }
         length := len(array)
-        glog.Debugfln("receive data replication update from: %s, start logid: %d, end logid: %d, size: %d", msg.Info.Name, array[0].Id, array[len(array)-1].Id, length)
+        //glog.Debugfln("receive data replication update from: %s, start logid: %d, end logid: %d, size: %d", msg.Info.Name, array[0].Id, array[len(array)-1].Id, length)
         if array != nil && length > 0 {
             for _, v := range array {
                 if v.Id > n.getLastLogId() {
@@ -254,7 +348,6 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
                     return
                 }
                 if rmsg := n.receiveMsgWithTimeout(conn, 10*time.Second); rmsg != nil {
-                    n.updatePeerInfo(rmsg.Info)
                     logid = rmsg.Info.LastLogId
                     if n.getLastLogId() == logid {
                         return

@@ -47,6 +47,10 @@ func (n *Node) doRecieveMsg(conn net.Conn) *Msg {
             ip, _      := gip.ParseAddress(conn.RemoteAddr().String())
             msg.Info.Ip = ip
         }
+        // 保存节点信息
+        if msg.Info.Id != n.Id {
+            n.updatePeerInfo(msg.Info)
+        }
         return msg
     }
     return nil
@@ -126,8 +130,12 @@ func (n *Node) sendAndReceiveMsgToNode(info *NodeInfo, port int, head int, body 
     conn := n.getConn(info.Ip, port)
     if conn != nil {
         defer conn.Close()
+        if n.checkConnInLocalNode(conn) {
+            n.Peers.Remove(info.Id)
+            return nil, errors.New("cannot make local connection")
+        }
         err := n.sendMsg(conn, head, body)
-        if err != nil {
+        if err == nil {
             msg := n.receiveMsg(conn)
             if msg != nil {
                 return msg, nil
@@ -380,11 +388,7 @@ func (n *Node) setPeersFromConfig(peers []string) {
         if v == ip {
             continue
         }
-        go func(ip string) {
-            if !n.sayHi(ip) {
-                n.updatePeerInfo(NodeInfo{Id: ip, Ip: ip})
-            }
-        }(v)
+        go n.sayHi(v)
     }
 }
 
@@ -471,10 +475,8 @@ func (n *Node) sayHi(ip string) bool {
     err := n.sendMsg(conn, gMSG_RAFT_HI, "")
     if err != nil {
         return false
-    }
-    msg := n.receiveMsg(conn)
-    if msg != nil && msg.Head == gMSG_RAFT_HI2 {
-        n.updatePeerInfo(msg.Info)
+    } else {
+        n.receiveMsg(conn)
     }
     return true
 }
@@ -501,16 +503,21 @@ func (n *Node) sayHiToLocalLan() {
 // 与远程节点对比谁可以成为leader，返回true表示自己，false表示对方节点
 // 需要同时对比日志信息及选举比分
 func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
+    // 优先比较数据新旧程度
+    if n.getLastLogId() > info.LastLogId {
+        return true
+    } else if n.getLastLogId() < info.LastLogId {
+        return false
+    }
+    // 如果数据一致，那么比较选举比分
     result      := true
     compareData := gjson.Encode(map[string]interface{}{
         "score": n.getScore(),
         "count": n.getScoreCount(),
     })
     msg, err := n.sendAndReceiveMsgToNode(info, gPORT_RAFT, gMSG_RAFT_LEADER_COMPARE_REQUEST, compareData)
-    if err == nil {
-        if msg.Head == gMSG_RAFT_LEADER_COMPARE_FAILURE {
-            result = false
-        }
+    if err != nil || (msg != nil && msg.Head == gMSG_RAFT_LEADER_COMPARE_FAILURE) {
+        result = false
     }
     return result
 }
@@ -725,19 +732,18 @@ func (n *Node) setRaftRole(role int32) {
 }
 
 func (n *Node) setLeader(info *NodeInfo) {
-    leader := n.getLeader()
-    if leader != nil {
-        if leader.Id == info.Id {
+    n.mutex.Lock()
+    defer n.mutex.Unlock()
+    if n.Leader != nil {
+        if n.Leader.Id == info.Id {
             return
         } else {
-            glog.Printf("leader changed from %s to %s\n", leader.Name, info.Name)
+            glog.Printf("leader changed from %s to %s\n", n.Leader.Name, info.Name)
         }
     } else {
         glog.Println("set leader:", info.Name)
     }
-    n.mutex.Lock()
     n.Leader = info
-    n.mutex.Unlock()
 }
 
 // 设置数据保存目录路径

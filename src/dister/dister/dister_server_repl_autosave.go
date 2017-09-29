@@ -41,8 +41,8 @@ func (n *Node) saveDataToFile() {
 
     data := make(map[string]interface{})
     data  = map[string]interface{} {
-        "LastLogId" : n.getLastLogId(),
-        "DataMap"   : *n.DataMap.Clone(),
+        "LastLogId"   : n.getLastLogId(),
+        "DataMap"     : *n.DataMap.Clone(),
     }
     content := []byte(gjson.Encode(&data))
     if gCOMPRESS_SAVING {

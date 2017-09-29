@@ -29,7 +29,7 @@ import (
 
 const (
     gVERSION                                = "1.2"   // 当前版本
-    gDEBUG                                  = false   // 用于控制调试信息，开发阶段使用
+    gDEBUG                                  = true    // 用于控制调试信息，开发阶段使用
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
@@ -59,7 +59,7 @@ const (
     gTCP_READ_TIMEOUT                       = 6000    // (毫秒)TCP链接读取超时
     gELECTION_TIMEOUT                       = 3000    // (毫秒)RAFT选举超时时间
     gELECTION_TIMEOUT_HEARTBEAT             = 500     // (毫秒)RAFT Leader统治维持心跳间隔
-    gLOG_REPL_DATA_UPDATE_INTERVAL          = 100     // (毫秒)数据同步间隔
+    gLOG_REPL_DATA_UPDATE_INTERVAL          = 1000    // (毫秒)数据同步间隔
     gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 2000    // (毫秒)Service同步检测心跳间隔
     gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔
     gLOG_REPL_LOGCLEAN_INTERVAL             = 2000    // (毫秒)LogList定期清理过期(已同步)的日志列表
@@ -86,15 +86,14 @@ const (
     // 数据同步操作
     gMSG_REPL_DATA_SET                      = 300
     gMSG_REPL_DATA_REMOVE                   = 310
-    gMSG_REPL_DATA_REPLICATION              = 320
-    gMSG_REPL_VALID_LOGID_CHECK             = 330
-    gMSG_REPL_FAILED                        = 340
-    gMSG_REPL_RESPONSE                      = 350
-    gMSG_REPL_PEERS_UPDATE                  = 360
-    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 370
-    gMSG_REPL_SERVICE_SET                   = 380
-    gMSG_REPL_SERVICE_REMOVE                = 390
-    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 400
+    gMSG_REPL_DATA_APPENDENTRY              = 320
+    gMSG_REPL_DATA_REPLICATION              = 330
+    gMSG_REPL_VALID_LOGID_CHECK             = 340
+    gMSG_REPL_FAILED                        = 350
+    gMSG_REPL_RESPONSE                      = 360
+    gMSG_REPL_PEERS_UPDATE                  = 370
+    gMSG_REPL_CONFIG_FROM_FOLLOWER          = 380
+    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 390
 
     // API相关
     gMSG_API_PEERS_ADD                      = 500

@@ -50,7 +50,6 @@ func (n *Node) heartbeatHandler() {
                         msg := n.receiveMsg(conn)
                         if msg != nil {
                             //glog.Println("receive heartbeat back from:", ip)
-                            n.updatePeerInfo(msg.Info)
                             switch msg.Head {
                                 case gMSG_RAFT_I_AM_LEADER:
                                     glog.Printfln("brains split, set leader %s, done heartbeating", msg.Info.Name)

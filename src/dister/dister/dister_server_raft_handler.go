@@ -13,10 +13,7 @@ func (n *Node) raftTcpHandler(conn net.Conn) {
         conn.Close()
         return
     }
-    // 保存peers
-    if msg.Info.Id != n.Id {
-        n.updatePeerInfo(msg.Info)
-    }
+
     // 消息处理
     switch msg.Head {
         case gMSG_RAFT_HI:                      n.onMsgRaftHi(conn, msg)
@@ -37,7 +34,6 @@ func (n *Node) onMsgRaftHi(conn net.Conn, msg *Msg) {
 
 // 心跳保持
 func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
-    n.updateElectionDeadline()
     if n.checkConnInLocalNode(conn) {
         n.Peers.Remove(msg.Info.Id)
         conn.Close()
@@ -53,9 +49,14 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
             n.setRaftRole(gROLE_RAFT_FOLLOWER)
         }
     } else if n.getLeader() == nil {
-        // 如果没有leader，那么设置leader
-        n.setLeader(&msg.Info)
-        n.setRaftRole(gROLE_RAFT_FOLLOWER)
+        if n.getLastLogId() > msg.Info.LastLogId {
+            // 不返回heartbeat消息，以便引起选举无法进行
+            result = gMSG_RAFT_RESPONSE
+        } else {
+            // 如果没有leader，并且目标节点满足成为本节点leader的条件，那么设置目标节点为leader
+            n.setLeader(&msg.Info)
+            n.setRaftRole(gROLE_RAFT_FOLLOWER)
+        }
     } else {
         // 脑裂问题处理
         if n.getLeader().Id != msg.Info.Id {
@@ -83,6 +84,9 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
             }
         }
     }
+    if result == gMSG_RAFT_HEARTBEAT {
+        n.updateElectionDeadline()
+    }
     n.sendMsg(conn, result, "")
 }
 
@@ -101,7 +105,6 @@ func (n *Node) onMsgRaftSplitBrainsCheck(conn net.Conn, msg *Msg) {
             if n.sendMsg(tconn, gMSG_RAFT_HI, "") == nil {
                 rmsg := n.receiveMsg(tconn)
                 if rmsg != nil {
-                    n.updatePeerInfo(rmsg.Info)
                     if !n.compareLeaderWithRemoteNode(&rmsg.Info) {
                         n.setLeader(&rmsg.Info)
                         n.setRaftRole(gROLE_RAFT_FOLLOWER)
@@ -119,7 +122,7 @@ func (n *Node) onMsgRaftSplitBrainsCheck(conn net.Conn, msg *Msg) {
 
 // 选举比分获取，如果新加入的节点，也会进入到这个方法中
 func (n *Node) onMsgRaftScoreRequest(conn net.Conn, msg *Msg) {
-    if n.getRaftRole() == gROLE_RAFT_LEADER {
+    if n.getRaftRole() == gROLE_RAFT_LEADER && n.getLastLogId() >= msg.Info.LastLogId {
         n.sendMsg(conn, gMSG_RAFT_I_AM_LEADER, "")
     } else {
         n.sendMsg(conn, gMSG_RAFT_RESPONSE, "")
@@ -131,7 +134,7 @@ func (n *Node) onMsgRaftScoreRequest(conn net.Conn, msg *Msg) {
 func (n *Node) onMsgRaftScoreCompareRequest(conn net.Conn, msg *Msg) {
     j := gjson.DecodeToJson(msg.Body)
     result := gMSG_RAFT_SCORE_COMPARE_SUCCESS
-    if n.getRaftRole() == gROLE_RAFT_LEADER {
+    if n.getRaftRole() == gROLE_RAFT_LEADER && n.getLastLogId() >= msg.Info.LastLogId {
         result = gMSG_RAFT_I_AM_LEADER
     } else {
         if n.compareLeaderWithRemoteNodeByDetail(msg.Info.LastLogId, int32(j.GetInt("count")), j.GetInt64("score")) {
@@ -146,7 +149,7 @@ func (n *Node) onMsgRaftScoreCompareRequest(conn net.Conn, msg *Msg) {
 
 // 两个leader进行比较
 func (n *Node) onMsgRaftLeaderCompareRequest(conn net.Conn, msg *Msg) {
-    j := gjson.DecodeToJson(msg.Body)
+    j      := gjson.DecodeToJson(msg.Body)
     result := gMSG_RAFT_LEADER_COMPARE_SUCCESS
     if n.compareLeaderWithRemoteNodeByDetail(msg.Info.LastLogId, int32(j.GetInt("count")), j.GetInt64("score")) {
         result = gMSG_RAFT_LEADER_COMPARE_FAILURE
