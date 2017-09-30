@@ -23,8 +23,9 @@ dister的灵感来源于ZooKeeper及Consul，它们都实现了类似的分布�
 
 相关文档：
 1. [dister的介绍及设计](http://johng.cn/dister-brief/)
-2. [dister的安装及使用](http://johng.cn/dister-installation-and-usage/)
-3. [dister的使用示例](http://johng.cn/dister-example/)
+1. [dister的安装及使用](http://johng.cn/dister-installation-and-usage/)
+1. [dister的使用示例](http://johng.cn/dister-example/)
+1. [dister的性能测试](http://johng.cn/dister-performance-test/)
 
 
 ### dister的历史
