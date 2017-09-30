@@ -28,17 +28,18 @@ import (
 )
 
 const (
-    gVERSION                                = "1.2"   // 当前版本
-    gDEBUG                                  = true    // 用于控制调试信息，开发阶段使用
+    gVERSION                                = "1.5"   // 当前版本
+    gDEBUG                                  = false   // 用于控制调试信息，开发阶段使用
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
+
     // 集群端口定义
     gPORT_RAFT                              = 4166    // 集群协议通信接口
     gPORT_REPL                              = 4167    // 集群数据同步接口
     gPORT_API                               = 4168    // 服务器对外API接口
-    gPORT_MONITOR                           = 4169    // 监控服务接口
-    gPORT_WEBUI                             = 4170    // WEB管理界面
+    //gPORT_MONITOR                           = 4169    // 监控服务接口
+    //gPORT_WEBUI                             = 4170    // WEB管理界面
 
     // 节点状态
     gSTATUS_DEAD                            = 0
