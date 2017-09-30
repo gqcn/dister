@@ -133,7 +133,7 @@ func (this *NodeApiService) getServiceFromLeader(name string) (string, error) {
         if err != nil {
             return "", err
         } else {
-            gcache.Set(key, r, 3600000)
+            gcache.Set(key, r, 60000)
             return r, nil
         }
     }
