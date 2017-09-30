@@ -179,13 +179,17 @@ func (n *Node) Run() {
     n.restoreFromFile()
 
     // 显示当前节点信息
+    logpathstr := glog.GetLogPath()
+    if logpathstr == "" {
+        logpathstr = "STDOUT"
+    }
     fmt.Printf( "dister version %s, start running...\n", gVERSION)
     fmt.Println("==================================================================================")
     fmt.Println("Host Id         :", n.Id)
     fmt.Println("Host Role       :", roleName(n.Role))
     fmt.Println("Host Name       :", n.Name)
     fmt.Println("Host Group      :", n.Group)
-    fmt.Println("Host LogPath    :", glog.GetLogPath())
+    fmt.Println("Host LogPath    :", logpathstr)
     fmt.Println("Host SavePath   :", n.getSavePath())
     fmt.Println("Host MinNode    :", n.MinNode)
     fmt.Println("Last Log Id     :", n.getLastLogId())

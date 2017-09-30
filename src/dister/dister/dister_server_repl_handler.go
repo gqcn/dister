@@ -5,7 +5,6 @@ package dister
 import (
     "net"
     "g/encoding/gjson"
-    "g/core/types/gmap"
     "g/util/gtime"
     "g/os/glog"
     "time"
@@ -41,7 +40,6 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
         case gMSG_REPL_VALID_LOGID_CHECK:           n.onMsgReplValidLogIdCheck(conn, msg)
         case gMSG_REPL_CONFIG_FROM_FOLLOWER:        n.onMsgConfigFromFollower(conn, msg)
-        case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:   n.onMsgServiceCompletelyUpdate(conn, msg)
         case gMSG_API_DATA_GET:                     n.onMsgApiDataGet(conn, msg)
         case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
         case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
@@ -234,11 +232,6 @@ func (n *Node) onMsgPeersUpdate(conn net.Conn, msg *Msg) {
         }
     }
     conn.Close()
-}
-
-// 心跳消息提交的完整更新消息
-func (n *Node) onMsgServiceCompletelyUpdate(conn net.Conn, msg *Msg) {
-    n.updateServiceFromRemoteNode(conn, msg)
 }
 
 // Service删除
@@ -448,36 +441,6 @@ func (n *Node) onMsgReplValidLogIdCheck(conn net.Conn, msg *Msg) {
         }
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, result)
-}
-
-
-// 从目标节点同步Service数据
-// follower<-leader
-func (n *Node) updateServiceFromRemoteNode(conn net.Conn, msg *Msg) {
-    glog.Println("receive service replication from", msg.Info.Name)
-    defer conn.Close()
-    m   := make(map[string]Service)
-    err := gjson.DecodeTo(msg.Body, &m)
-    if err == nil {
-        newm := gmap.NewStringInterfaceMap()
-        for k, v := range m {
-            newm.Set(k, v)
-        }
-        n.setService(newm)
-        n.setLastServiceLogId(msg.Info.LastServiceLogId)
-    } else {
-        glog.Error(err)
-    }
-}
-
-// 同步Service到目标节点
-// leader->follower
-func (n *Node) updateServiceToRemoteNode(conn net.Conn) {
-    serviceJson := gjson.Encode(*n.Service.Clone())
-    if err := n.sendMsg(conn, gMSG_REPL_SERVICE_COMPLETELY_UPDATE, serviceJson); err != nil {
-        glog.Error(err)
-        return
-    }
 }
 
 // 新增节点,通过IP添加
