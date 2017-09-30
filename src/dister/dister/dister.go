@@ -63,7 +63,7 @@ const (
     gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 2000    // (毫秒)Service同步检测心跳间隔
     gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔(更新时会做更新判断)
     gLOG_REPL_LOGCLEAN_INTERVAL             = 2000    // (毫秒)LogList定期清理过期(已同步)的日志列表
-    gLOG_REPL_PEERS_INTERVAL                = 2000    // (毫秒)Peers节点信息同步(非完整同步)
+    gLOG_REPL_PEERS_INTERVAL                = 5000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL          = 2000    // (毫秒)健康检查默认间隔
 
     // RAFT操作
@@ -93,7 +93,7 @@ const (
     gMSG_REPL_RESPONSE                      = 360
     gMSG_REPL_PEERS_UPDATE                  = 370
     gMSG_REPL_CONFIG_FROM_FOLLOWER          = 380
-    gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 390
+    gMSG_REPL_SERVICE_UPDATE                = 390
 
     // API相关
     gMSG_API_DATA_GET                       = 500

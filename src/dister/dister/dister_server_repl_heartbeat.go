@@ -10,6 +10,8 @@ import (
     "os"
     "bufio"
     "g/os/glog"
+    "fmt"
+    "g/os/gcache"
     "io"
     "g/core/types/gset"
     "regexp"
@@ -20,6 +22,9 @@ import (
 func (n *Node) replicationHandler() {
     // 数据同步检测
     go n.dataReplicationLoop()
+
+    // Service同步检测
+    go n.serviceReplicationLoop()
 
     // Peers同步检测
     go n.peersReplicationLoop()
@@ -37,7 +42,7 @@ func (n *Node) dataReplicationLoop() {
         if n.getRaftRole() == gROLE_RAFT_LEADER {
             for _, v := range n.Peers.Values() {
                 info := v.(NodeInfo)
-                if info.Role != gROLE_SERVER && conns.Contains(info.Id) || info.Status != gSTATUS_ALIVE || info.Id == n.getId() {
+                if info.Role != gROLE_SERVER || info.Status != gSTATUS_ALIVE || conns.Contains(info.Id) || info.Id == n.getId() {
                     continue
                 }
                 go func(id, ip string) {
@@ -62,6 +67,38 @@ func (n *Node) dataReplicationLoop() {
             }
         }
         time.Sleep(1000 * time.Millisecond)
+    }
+}
+
+// Service自动同步检测
+// 注意：这里只同步数据给server，client节点不需要存储任何数据
+func (n *Node) serviceReplicationLoop() {
+    for {
+        if n.getRaftRole() == gROLE_RAFT_LEADER {
+            for _, v := range n.Peers.Values() {
+                info := v.(NodeInfo)
+                //glog.Printf("%v: %v <= %v\n", info.Ip, n.getLastServiceLogId(), info.LastServiceLogId)
+                if info.Role != gROLE_SERVER || info.Status != gSTATUS_ALIVE || n.getLastServiceLogId() <= info.LastServiceLogId {
+                    continue
+                }
+                go func(info *NodeInfo) {
+                    key  := fmt.Sprintf("dister_service_replication_%s", info.Id)
+                    if gcache.Get(key) != nil {
+                        return
+                    }
+                    gcache.Set(key, struct {}{}, 10000)
+                    defer gcache.Remove(key)
+
+                    conn := n.getConn(info.Ip, gPORT_REPL)
+                    if conn != nil {
+                        defer conn.Close()
+                        glog.Println("send service replication from", n.getName(), "to", info.Name)
+                        n.updateServiceToRemoteNode(conn)
+                    }
+                }(&info)
+            }
+        }
+        time.Sleep(gLOG_REPL_SERVICE_UPDATE_INTERVAL * time.Millisecond)
     }
 }
 
