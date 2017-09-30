@@ -46,13 +46,13 @@ func cmd_nodes () {
     if err != nil {
         fmt.Println(err)
     } else {
-        fmt.Printf("%12s %25s %25s %15s %12s %10s\n", "Id", "Name", "Group", "Ip", "Role", "Status")
+        fmt.Printf("%12s %25s %25s %15s %12s %12s %10s\n", "Id", "Name", "Group", "Ip", "Type", "Role", "Status")
         for _,v := range peers {
             status := "alive"
             if v.Status == 0 {
                 status = "dead"
             }
-            fmt.Printf("%12s %25s %25s %15s %12s %10s\n", v.Id, v.Name, v.Group, v.Ip, raftRoleName(v.RaftRole), status)
+            fmt.Printf("%12s %25s %25s %15s %12s %12s %10s\n", v.Id, v.Name, v.Group, v.Ip, roleName(v.Role), raftRoleName(v.RaftRole), status)
         }
     }
 }
