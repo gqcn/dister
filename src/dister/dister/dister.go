@@ -29,7 +29,7 @@ import (
 
 const (
     gVERSION                                = "1.2"   // 当前版本
-    gDEBUG                                  = false   // 用于控制调试信息，开发阶段使用
+    gDEBUG                                  = true    // 用于控制调试信息，开发阶段使用
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
     gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
@@ -96,10 +96,12 @@ const (
     gMSG_REPL_SERVICE_COMPLETELY_UPDATE     = 390
 
     // API相关
-    gMSG_API_PEERS_ADD                      = 500
-    gMSG_API_PEERS_REMOVE                   = 510
-    gMSG_API_SERVICE_SET                    = 520
-    gMSG_API_SERVICE_REMOVE                 = 530
+    gMSG_API_DATA_GET                       = 500
+    gMSG_API_PEERS_ADD                      = 510
+    gMSG_API_PEERS_REMOVE                   = 520
+    gMSG_API_SERVICE_GET                    = 530
+    gMSG_API_SERVICE_SET                    = 540
+    gMSG_API_SERVICE_REMOVE                 = 550
 )
 
 // 消息

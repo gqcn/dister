@@ -15,6 +15,10 @@ import (
 
 // 日志自动保存处理
 func (n *Node) autoSavingHandler() {
+    // 只有server节点才进行数据物理化存储
+    if n.getRole() != gROLE_SERVER {
+        return
+    }
     lastLogId     := n.getLastLogId()
     lastServiceId := n.getLastServiceLogId()
     for {
@@ -80,6 +84,11 @@ func (n *Node) saveServiceToFile() {
 
 // 从物理化文件中恢复变量
 func (n *Node) restoreFromFile() {
+    // 只有server节点才进行数据物理化存储
+    if n.getRole() != gROLE_SERVER {
+        return
+    }
+
     var wg sync.WaitGroup
 
     wg.Add(1)

@@ -32,7 +32,7 @@ func (n *Node) onMsgRaftHi(conn net.Conn, msg *Msg) {
     n.sendMsg(conn, gMSG_RAFT_HI2, "")
 }
 
-// 心跳保持
+// RAFT协议心跳保持，用以维系RAFT集群统治，保证集群各节点的角色状态
 func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
     if n.checkConnInLocalNode(conn) {
         n.Peers.Remove(msg.Info.Id)
@@ -50,7 +50,7 @@ func (n *Node) onMsgRaftHeartbeat(conn net.Conn, msg *Msg) {
         }
     } else if n.getLeader() == nil {
         if n.getLastLogId() > msg.Info.LastLogId {
-            // 不返回heartbeat消息，以便引起本节点选举无法进行
+            // leader日志太久，不承认该leader，不返回heartbeat消息
             result = gMSG_RAFT_RESPONSE
         } else {
             // 如果没有leader，并且目标节点满足成为本节点leader的条件，那么设置目标节点为leader

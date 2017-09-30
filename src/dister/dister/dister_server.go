@@ -399,7 +399,7 @@ func (n *Node) replicateConfigToLeader() {
             if n.getLeader() != nil {
                 if gfile.Exists(n.CfgFilePath) {
                     //glog.Println("replicate config to leader")
-                    err := n.SendToLeader(gMSG_REPL_CONFIG_FROM_FOLLOWER, gPORT_REPL, gfile.GetContents(n.CfgFilePath))
+                    _, err := n.SendToLeader(gMSG_REPL_CONFIG_FROM_FOLLOWER, gPORT_REPL, gfile.GetContents(n.CfgFilePath))
                     if err == nil {
                         n.CfgReplicated = true
                         //glog.Println("replicate config to leader, done")
@@ -433,27 +433,29 @@ func (n *Node) getNodeInfo() *NodeInfo {
     }
 }
 
-// 向leader发送操作请求
-func (n *Node) SendToLeader(head int, port int, body string) error {
+// 向leader发送操作请求，并返回执行结果
+func (n *Node) SendToLeader(head int, port int, body string) (string, error) {
     leader := n.getLeader()
     if leader == nil {
-        return errors.New(fmt.Sprintf("leader not found, please try again after leader election done, request head: %d", head))
+        return "", errors.New(fmt.Sprintf("leader not found, please try again after leader election done, request head: %d", head))
     }
     conn := n.getConn(leader.Ip, port)
     if conn == nil {
-        return errors.New("could not connect to leader: " + leader.Ip)
+        return "", errors.New("could not connect to leader: " + leader.Ip)
     }
     defer conn.Close()
     err := n.sendMsg(conn, head, body)
     if err != nil {
-        return errors.New("sending request error: " + err.Error())
+        return "", errors.New("sending request error: " + err.Error())
     } else {
         msg := n.receiveMsg(conn)
         if msg != nil && ((port == gPORT_RAFT && msg.Head != gMSG_RAFT_RESPONSE) || (port == gPORT_REPL && msg.Head != gMSG_REPL_RESPONSE)) {
-            return errors.New("handling request error")
+            return "", errors.New(fmt.Sprintf("handling request error, response code: %d", msg.Head))
+        } else {
+            return msg.Body, nil
         }
     }
-    return nil
+    return "", errors.New("unknown error")
 }
 
 // 通过IP向一个节点发送消息并建立双方联系
@@ -608,6 +610,10 @@ func (n *Node) getLeader() *NodeInfo {
     r := n.Leader
     n.mutex.RUnlock()
     return r
+}
+
+func (n *Node) getRole() int32 {
+    return atomic.LoadInt32(&n.Role)
 }
 
 func (n *Node) getRaftRole() int32 {

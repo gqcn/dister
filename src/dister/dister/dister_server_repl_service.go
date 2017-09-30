@@ -134,7 +134,7 @@ func (n *Node) serviceHealthCheckHandler() {
                 go n.checkServiceHealth(k, v)
             }
         }
-        time.Sleep(100 * time.Millisecond)
+        time.Sleep(1000 * time.Millisecond)
     }
 }
 
@@ -143,9 +143,11 @@ func (n *Node) serviceHealthCheckHandler() {
 func (n *Node) checkServiceHealth(skey string, node Service) {
     checkingKey := "dister_service_node_checking_" + skey
     if gcache.Get(checkingKey) != nil {
+        //glog.Debugfln("node:%s is being checking health", skey)
         return
     }
     gcache.Set(checkingKey, struct {}{}, 60000)
+    //glog.Debugfln("checking health of node:%s", skey)
     ostatus, _ := node.Node["status"]
     n.doCheckService(skey, &node)
     nstatus, _ := node.Node["status"]
@@ -159,9 +161,11 @@ func (n *Node) checkServiceHealth(skey string, node Service) {
     timeout     := int64(gSERVICE_HEALTH_CHECK_INTERVAL)
     interval, _ := node.Node["interval"]
     if interval != nil {
-        timeout, _ = strconv.ParseInt(interval.(string), 10, 64)
+        if r, err := strconv.ParseInt(interval.(string), 10, 64); err == nil {
+            timeout = r
+        }
     }
-
+    //glog.Debugfln("checking health of node:%s, done", skey)
     gcache.Set(checkingKey, struct {}{}, timeout)
 }
 

@@ -6,24 +6,21 @@ import (
     "errors"
     "fmt"
     "reflect"
+    "g/os/gcache"
 )
 
 // Service 查询
 func (this *NodeApiService) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     name := r.GetRequestString("name")
-    if name == "" {
-        if this.node.Service.Size() > 1000 {
-            w.ResponseJson(0, "too large service size, need a service name to search", nil)
+    if this.node.getRole() != gROLE_SERVER {
+        r, err := this.getServiceFromLeader(name)
+        if err != nil {
+            w.ResponseJson(0, err.Error(), nil)
         } else {
-            w.ResponseJson(1, "ok", this.node.getServiceMapForApi())
+            w.Write([]byte(r))
         }
     } else {
-        sc := this.node.getServiceForApiByName(name)
-        if sc != nil {
-            w.ResponseJson(1, "ok", sc)
-        } else {
-            w.ResponseJson(0, "service not found", nil)
-        }
+        w.Write([]byte(this.node.getServiceByApi(name)))
     }
 }
 
@@ -50,7 +47,7 @@ func (this *NodeApiService) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse
     }
     // 提交数据到leader
     for _, v := range list {
-        err  = this.node.SendToLeader(gMSG_API_SERVICE_SET, gPORT_REPL, gjson.Encode(v))
+        _, err  = this.node.SendToLeader(gMSG_API_SERVICE_SET, gPORT_REPL, gjson.Encode(v))
         if err != nil {
             w.ResponseJson(0, err.Error(), nil)
             return
@@ -113,11 +110,32 @@ func (this *NodeApiService) Delete(r *ghttp.ClientRequest, w *ghttp.ServerRespon
         w.ResponseJson(0, "invalid data type: " + err.Error(), nil)
         return
     }
-    err  = this.node.SendToLeader(gMSG_API_SERVICE_REMOVE, gPORT_REPL, gjson.Encode(list))
+    _, err  = this.node.SendToLeader(gMSG_API_SERVICE_REMOVE, gPORT_REPL, gjson.Encode(list))
     if err != nil {
         w.ResponseJson(0, err.Error(), nil)
     } else {
         w.ResponseJson(1, "ok", nil)
+    }
+}
+
+// 从Leader获取/查询Service
+func (this *NodeApiService) getServiceFromLeader(name string) (string, error) {
+    leader := this.node.getLeader()
+    if leader == nil {
+        return "", errors.New(fmt.Sprintf("leader not found, please try again after leader election done"))
+    }
+    key    := fmt.Sprintf("dister_service_get_for_api_%d_%s", leader.LastServiceLogId, name)
+    result := gcache.Get(key)
+    if result != nil {
+        return result.(string), nil
+    } else {
+        r, err := this.node.SendToLeader(gMSG_API_SERVICE_GET, gPORT_REPL, name)
+        if err != nil {
+            return "", err
+        } else {
+            gcache.Set(key, r, 3600000)
+            return r, nil
+        }
     }
 }
 

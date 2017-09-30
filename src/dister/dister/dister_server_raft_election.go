@@ -13,7 +13,7 @@ import (
 // 3个节点以内的集群也可以完成leader选举
 func (n *Node) electionHandler() {
     for {
-        if n.Role == gROLE_SERVER && n.getRaftRole() != gROLE_RAFT_LEADER && gtime.Millisecond() >= n.getElectionDeadline() {
+        if n.getRole() == gROLE_SERVER && n.getRaftRole() != gROLE_RAFT_LEADER && gtime.Millisecond() >= n.getElectionDeadline() {
             // 使用MinNode变量控制最小节点数(这里判断的时候要去除自身的数量)
             if n.Peers.Size() >= int(n.getMinNode() - 1) {
                 if n.Peers.Size() > 0 {
@@ -174,7 +174,7 @@ func (n *Node) checkFailedTheElection() bool {
         return true
     }
     // 如果选举过程中状态变化，那么自身选举失败
-    if n.getRaftRole() != gROLE_RAFT_CANDIDATE {
+    if n.getRaftRole() == gROLE_RAFT_FOLLOWER {
         return true
     }
     return false

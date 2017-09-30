@@ -38,17 +38,29 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_REPL_DATA_REMOVE:                 n.onMsgReplDataRemove(conn, msg)
         case gMSG_REPL_DATA_APPENDENTRY:            n.onMsgReplDataAppendEntry(conn, msg)
         case gMSG_REPL_DATA_REPLICATION:            n.onMsgReplDataReplication(conn, msg)
-        case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
-        case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgPeersUpdate(conn, msg)
         case gMSG_REPL_VALID_LOGID_CHECK:           n.onMsgReplValidLogIdCheck(conn, msg)
         case gMSG_REPL_CONFIG_FROM_FOLLOWER:        n.onMsgConfigFromFollower(conn, msg)
         case gMSG_REPL_SERVICE_COMPLETELY_UPDATE:   n.onMsgServiceCompletelyUpdate(conn, msg)
-        case gMSG_API_SERVICE_SET:                  n.onMsgServiceSet(conn, msg)
-        case gMSG_API_SERVICE_REMOVE:               n.onMsgServiceRemove(conn, msg)
+        case gMSG_API_DATA_GET:                     n.onMsgApiDataGet(conn, msg)
+        case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
+        case gMSG_API_PEERS_REMOVE:                 n.onMsgApiPeersRemove(conn, msg)
+        case gMSG_API_SERVICE_GET:                  n.onMsgApiServiceGet(conn, msg)
+        case gMSG_API_SERVICE_SET:                  n.onMsgApiServiceSet(conn, msg)
+        case gMSG_API_SERVICE_REMOVE:               n.onMsgApiServiceRemove(conn, msg)
     }
     //这里不用自动关闭链接，由于链接有读取超时，当一段时间没有数据时会自动关闭
     n.replTcpHandler(conn)
+}
+
+// 用于API接口的Service查询
+func (n *Node) onMsgApiServiceGet(conn net.Conn, msg *Msg) {
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, n.getServiceByApi(msg.Body))
+}
+
+// 用于API接口的数据查询
+func (n *Node) onMsgApiDataGet(conn net.Conn, msg *Msg) {
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, n.getDataByApi(msg.Body))
 }
 
 // kv设置，这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
@@ -89,7 +101,8 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
 func (n *Node) onMsgReplDataAppendEntry(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_RESPONSE
     var entry LogEntry
-    // 这里必须要保证节点当前的数据是和leader同步的，才能执行新的数据写入
+    // 这里必须要保证节点当前的数据是和leader同步的，才能执行新的数据写入，否则会造成数据不一致
+    // 如果数据不同步的情况下，返回失败，由另外的数据同步线程来处理
     err := gjson.DecodeTo(msg.Body, &entry)
     if msg.Info.LastLogId == n.getLastLogId() && n.getRaftRole() != gROLE_RAFT_LEADER && err == nil {
         n.dmutex.Lock()
@@ -229,7 +242,7 @@ func (n *Node) onMsgServiceCompletelyUpdate(conn net.Conn, msg *Msg) {
 }
 
 // Service删除
-func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
+func (n *Node) onMsgApiServiceRemove(conn net.Conn, msg *Msg) {
     list := make([]string, 0)
     if gjson.DecodeTo(msg.Body, &list) == nil {
         if n.removeServiceByNames(list) {
@@ -241,13 +254,14 @@ func (n *Node) onMsgServiceRemove(conn net.Conn, msg *Msg) {
 
 // Service设置
 // 新写入的服务不做同步，等待服务健康检查后再做同步
-func (n *Node) onMsgServiceSet(conn net.Conn, msg *Msg) {
+func (n *Node) onMsgApiServiceSet(conn net.Conn, msg *Msg) {
     var sc ServiceConfig
     if gjson.DecodeTo(msg.Body, &sc) == nil {
         n.removeServiceByNames([]string{sc.Name})
         for k, v := range sc.Node {
             key := n.getServiceKeyByNameAndIndex(sc.Name, k)
             n.Service.Set(key, Service{ sc.Type, v })
+            n.setLastServiceLogId(gtime.Millisecond())
         }
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, "")

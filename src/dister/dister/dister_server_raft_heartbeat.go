@@ -47,8 +47,7 @@ func (n *Node) heartbeatHandler() {
                             return
                         }
                         // 接收回复
-                        msg := n.receiveMsg(conn)
-                        if msg != nil {
+                        if msg := n.receiveMsg(conn); msg != nil {
                             //glog.Println("receive heartbeat back from:", ip)
                             switch msg.Head {
                                 case gMSG_RAFT_I_AM_LEADER:
@@ -63,9 +62,6 @@ func (n *Node) heartbeatHandler() {
                                 default:
                                     time.Sleep(gELECTION_TIMEOUT_HEARTBEAT * time.Millisecond)
                             }
-                        } else {
-                            n.updatePeerStatus(id, gSTATUS_DEAD)
-                            return
                         }
                     }
                 }(info.Id, info.Ip)

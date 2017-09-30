@@ -24,7 +24,7 @@ func (n *Node) replicationHandler() {
     go n.dataReplicationLoop()
 
     // Service同步检测
-    go n.serviceReplicationLoop()
+    //go n.serviceReplicationLoop()
 
     // Peers同步检测
     go n.peersReplicationLoop()
@@ -34,6 +34,7 @@ func (n *Node) replicationHandler() {
 }
 
 // 日志自动同步检查，每一个节点保持一个线程检查，保证同步能够快速进行
+// 注意：这里只同步数据给server，client节点不需要存储任何数据
 func (n *Node) dataReplicationLoop() {
     // 存储已经保持心跳的节点
     conns := gset.NewStringSet()
@@ -41,7 +42,7 @@ func (n *Node) dataReplicationLoop() {
         if n.getRaftRole() == gROLE_RAFT_LEADER {
             for _, v := range n.Peers.Values() {
                 info := v.(NodeInfo)
-                if conns.Contains(info.Id) || info.Status != gSTATUS_ALIVE || info.Id == n.getId() {
+                if info.Role != gROLE_SERVER && conns.Contains(info.Id) || info.Status != gSTATUS_ALIVE || info.Id == n.getId() {
                     continue
                 }
                 go func(id, ip string) {

@@ -7,6 +7,7 @@ import (
     "g/util/grand"
     "strconv"
     "g/os/gcache"
+    "g/encoding/gjson"
 )
 
 // 用于负载均衡计算的结构体
@@ -37,13 +38,57 @@ func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse)
     }
 }
 
+// 从Leader获取/查询Service
+func (this *NodeApiBalance) getServiceFromLeaderByName(name string) (interface{}, error) {
+    leader := this.node.getLeader()
+    if leader == nil {
+        return nil, errors.New(fmt.Sprintf("leader not found, please try again after leader election done"))
+    }
+    key    := fmt.Sprintf("dister_balance_service_for_api_%d_%s", leader.LastServiceLogId, name)
+    result := gcache.Get(key)
+    if result != nil {
+        return result, nil
+    } else {
+        r, err := this.node.SendToLeader(gMSG_API_SERVICE_GET, gPORT_REPL, name)
+        if err != nil {
+            return nil, err
+        } else {
+            var res ghttp.ResponseJson
+            err = gjson.DecodeTo(r, &res)
+            if err != nil {
+                return nil, err
+            } else {
+                // 转换数据结构，这里即使res.Data是空，也必须存一个空的对象进去，以便缓存
+                var sc ServiceConfig
+                gjson.DecodeTo(gjson.Encode(res.Data), &sc)
+                gcache.Set(key, sc, 3600000)
+                return sc, nil
+            }
+        }
+    }
+}
+
 // 查询存货的service, 并根据priority计算负载均衡，取出一条返回
-func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}, error) {
-    r := this.node.getServiceForApiByName(name)
-    if r == nil {
+func (this *NodeApiBalance) getAliveServiceByPriority(name string) (interface{}, error) {
+    var s ServiceConfig
+    if this.node.getRole() != gROLE_SERVER {
+        r, err := this.getServiceFromLeaderByName(name)
+        if err != nil {
+            return nil, err
+        } else {
+            s = r.(ServiceConfig)
+        }
+    } else {
+        r := this.node.getServiceForApiByName(name)
+        if r == nil {
+            return nil, errors.New(fmt.Sprintf("no service named '%s'", name))
+        } else {
+            s = r.(ServiceConfig)
+        }
+    }
+    if s.Name == "" {
         return nil, errors.New(fmt.Sprintf("no service named '%s'", name))
     }
-    s    := r.(ServiceConfig)
     list := make([]PriorityNode, 0)
     for k, m := range s.Node {
         status, ok := m["status"]
@@ -60,7 +105,7 @@ func (this *NodeApiBalance) getAliveServiceByPriority(name string ) (interface{}
         }
     }
     if len(list) < 1 {
-        return nil, errors.New("service does not support balance, or no nodes of this service are alive")
+        return nil, errors.New("no nodes of this service are alive")
     }
     index := this.getServiceByPriority(list)
     if index < 0 {
