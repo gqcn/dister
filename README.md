@@ -27,5 +27,14 @@ dister的灵感来源于ZooKeeper及Consul，它们都实现了类似的分布�
 3. [dister的使用示例](http://johng.cn/dister-example/)
 
 
+### dister的历史
+* 2017-06-29 go开发框架gf项目立项，其中一个子项目为研究RAFT分布式算法而成立，名称为gluster
+* 2017-09-06 gluster作为一个子项目从gf项目中拆分出来
+* 2017-09-20 gluster v1.0开源版本发布
+* 2017-09-28 为避贤于glusterfs项目，gluster更名为dister，全称为Distribution Cluster，取两个单词的前三个字符与后三个字符构成
+* 2017-09-30 完成dister的功能测试、性能测试及数据一致性测试，发布v1.5_stable稳定版本
+* 未来：dister有着很清晰的未来，却有一段很长的路要走...
+
+
 
 
