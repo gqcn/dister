@@ -28,10 +28,10 @@ import (
 )
 
 const (
-    gVERSION                                = "1.5"   // 当前版本
-    gDEBUG                                  = false   // 用于控制调试信息，开发阶段使用
-    gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩
-    gCOMPRESS_SAVING                        = true    // 是否在存储时压缩内容
+    gVERSION                                = "1.6"   // 当前版本
+    gDEBUG                                  = true    // 用于控制调试信息(开发阶段使用)
+    gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩(开发阶段使用)
+    gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容(开发阶段使用)
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
 
     // 集群端口定义
@@ -63,7 +63,7 @@ const (
     gLOG_REPL_DATA_UPDATE_INTERVAL          = 1000    // (毫秒)数据同步间隔
     gLOG_REPL_SERVICE_UPDATE_INTERVAL       = 2000    // (毫秒)Service同步检测心跳间隔
     gLOG_REPL_AUTOSAVE_INTERVAL             = 1000    // (毫秒)数据自动物理化保存的间隔(更新时会做更新判断)
-    gLOG_REPL_LOGCLEAN_INTERVAL             = 2000    // (毫秒)LogList定期清理过期(已同步)的日志列表
+    gLOG_REPL_LOGCLEAN_INTERVAL             = 5000    // (毫秒)LogList定期清理过期(已同步)的日志列表
     gLOG_REPL_PEERS_INTERVAL                = 5000    // (毫秒)Peers节点信息同步(非完整同步)
     gSERVICE_HEALTH_CHECK_INTERVAL          = 2000    // (毫秒)健康检查默认间隔
 
@@ -89,7 +89,7 @@ const (
     gMSG_REPL_DATA_REMOVE                   = 310
     gMSG_REPL_DATA_APPENDENTRY              = 320
     gMSG_REPL_DATA_REPLICATION              = 330
-    gMSG_REPL_VALID_LOGID_CHECK             = 340
+    gMSG_REPL_VALID_LOGID_CHECK_FIX         = 340
     gMSG_REPL_FAILED                        = 350
     gMSG_REPL_RESPONSE                      = 360
     gMSG_REPL_PEERS_UPDATE                  = 370
@@ -137,7 +137,7 @@ type Node struct {
     LogIdIndex           int64                    // 用于生成LogId的参考字段
     LastLogId            int64                    // 最后一次保存log的id，用以数据一致性判断
     LastServiceLogId     int64                    // 最后一次保存的service id号，用以识别本地Service数据是否已更新，不做Leader与Follower的同步数据
-    LogList              *glist.SafeList          // leader日志列表，用以数据同步
+    LogList              *glist.SafeList          // 日志列表，用以存储临时的消息日志，以便快速进行数据同步到其他节点，仅在Leader节点存储
     ServiceList          *glist.SafeList          // Service同步事件列表，用以Service同步
     SavePath             string                   // 物理存储的本地数据*目录*绝对路径
     Service              *gmap.StringInterfaceMap // 存储的服务配置表

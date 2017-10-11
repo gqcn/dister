@@ -14,26 +14,27 @@ import (
 
 // K-V 查询
 func (this *NodeApiKv) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    //items := make(map[string]string)
-    //err   := gjson.DecodeTo("{\"key_99999\":\"value_99999\"}", &items)
-    //if err != nil {
-    //    w.ResponseJson(0, "invalid data type: " + err.Error(), nil)
-    //    return
-    //}
-    //
-    //_, err  = this.node.SendToLeader(gMSG_REPL_DATA_SET, gPORT_REPL, gjson.Encode(items))
-    //if err != nil {
-    //    w.WriteHeader(500)
-    //    return
-    //} else {
-    //    // 为保证客户端能够及时响应（例如在写入请求的下一次获取请求将一定能够获取到最新的数据），
-    //    // 因此，请求端应当在leader返回成功后，同时将该数据写入到本地，这是保证整体集群效率的一个做法
-    //    leader := this.node.getLeader()
-    //    if leader != nil && this.node.getId() != leader.Id {
-    //        this.node.DataMap.BatchSet(items)
-    //    }
-    //    w.ResponseJson(1, "ok", nil)
-    //}
+    items := make(map[string]string)
+    err   := gjson.DecodeTo("{\"key_99999\":\"value_99999\"}", &items)
+    if err != nil {
+        w.ResponseJson(0, "invalid data type: " + err.Error(), nil)
+        return
+    }
+
+    _, err  = this.node.SendToLeader(gMSG_REPL_DATA_SET, gPORT_REPL, gjson.Encode(items))
+    if err != nil {
+        w.WriteHeader(500)
+        return
+    } else {
+        // 为保证客户端能够及时响应（例如在写入请求的下一次获取请求将一定能够获取到最新的数据），
+        // 因此，请求端应当在leader返回成功后，同时将该数据写入到本地，这是保证整体集群效率的一个做法
+        leader := this.node.getLeader()
+        if leader != nil && this.node.getId() != leader.Id {
+            this.node.DataMap.BatchSet(items)
+        }
+        w.ResponseJson(1, "ok", nil)
+    }
+    return
 
     k := r.GetRequestString("k")
     if this.node.getRole() != gROLE_SERVER {

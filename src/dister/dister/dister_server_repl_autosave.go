@@ -123,6 +123,7 @@ func (n *Node) restoreDataMap() {
             } else {
                 glog.Error(err)
             }
+            // 判断日志与数据存储的一致性，并执行校验恢复
             list := n.getLogEntryListFromFileByLogId(id, 0, false)
             if len(list) > 0 {
                 logid := id

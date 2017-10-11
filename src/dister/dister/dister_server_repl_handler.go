@@ -40,7 +40,7 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_REPL_DATA_REPLICATION:            n.onMsgReplDataReplication(conn, msg)
         case gMSG_REPL_PEERS_UPDATE:                n.onMsgReplPeersUpdate(conn, msg)
         case gMSG_REPL_SERVICE_UPDATE:              n.onMsgReplServiceUpdate(conn, msg)
-        case gMSG_REPL_VALID_LOGID_CHECK:           n.onMsgReplValidLogIdCheck(conn, msg)
+        case gMSG_REPL_VALID_LOGID_CHECK_FIX:       n.onMsgReplValidLogIdCheckFix(conn, msg)
         case gMSG_REPL_CONFIG_FROM_FOLLOWER:        n.onMsgReplConfigFromFollower(conn, msg)
         case gMSG_API_DATA_GET:                     n.onMsgApiDataGet(conn, msg)
         case gMSG_API_PEERS_ADD:                    n.onMsgApiPeersAdd(conn, msg)
@@ -76,7 +76,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
                 Act   : msg.Head,
                 Items : items,
             }
-            if n.sendLogEntryToPeers(&entry) {
+            if n.sendAppendLogEntryToPeers(&entry) {
                 n.LogList.PushFront(&entry)
                 n.saveLogEntry(&entry)
             } else {
@@ -96,7 +96,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
 }
 
 // 当Leader获取数据写入时，直接写入数据请求
-// 这里去掉了RAFT的Uncommtted LogEntry流程，算是一个优化，为提高写入性能与保证数据一致性的一个折中方案
+// 这里将RAFT的Uncommtted LogEntry和Append LogEntry请求合并为一个请求，算是一个优化，为提高写入性能与保证数据一致性的一个折中方案
 // 因此建议客户端在请求失败时应当需要有重试机制
 func (n *Node) onMsgReplDataAppendEntry(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_RESPONSE
@@ -106,7 +106,6 @@ func (n *Node) onMsgReplDataAppendEntry(conn net.Conn, msg *Msg) {
     err := gjson.DecodeTo(msg.Body, &entry)
     if msg.Info.LastLogId == n.getLastLogId() && n.getRaftRole() != gROLE_RAFT_LEADER && err == nil {
         n.dmutex.Lock()
-        n.LogList.PushFront(&entry)
         n.saveLogEntry(&entry)
         n.dmutex.Unlock()
     } else {
@@ -117,16 +116,8 @@ func (n *Node) onMsgReplDataAppendEntry(conn net.Conn, msg *Msg) {
 
 // 发送数据操作到其他节点，保证有另外一个server节点成功，那么该请求便成功
 // 这里只处理server节点，client节点通过另外的数据同步线程进行数据同步
-func (n *Node) sendLogEntryToPeers(entry *LogEntry) bool {
-    // 只有一个leader节点，并且配置是允许单节点运行
-    if n.Peers.Size() < 1 && n.getMinNode() == 1 {
-        if n.getMinNode() == 1 {
-            return true
-        } else {
-            return false
-        }
-    }
-    // 获取Server节点列表
+func (n *Node) sendAppendLogEntryToPeers(entry *LogEntry) bool {
+    // 获取存活的Server节点列表
     list  := n.getAliveServerNodes()
     total := int32(len(list))
     if total == 0 {
@@ -167,7 +158,7 @@ func (n *Node) sendLogEntryToPeers(entry *LogEntry) bool {
     return result
 }
 
-// 获取存货的节点数，并做缓存处理，以提高读取效率
+// 获取存活的Server节点数，并做缓存处理，以提高读取效率
 func (n *Node) getAliveServerNodes() []NodeInfo {
     key    := "dister_cached_server_nodes"
     result := gcache.Get(key)
@@ -297,15 +288,15 @@ func (n *Node) saveLogEntryToFile(entry *LogEntry) {
 // 保存LogEntry到内存变量
 func (n *Node) saveLogEntryToVar(entry *LogEntry) {
     switch entry.Act {
-    case gMSG_REPL_DATA_SET:
-        for k, v := range entry.Items.(map[string]interface{}) {
-            n.DataMap.Set(k, v.(string))
-        }
+        case gMSG_REPL_DATA_SET:
+            for k, v := range entry.Items.(map[string]interface{}) {
+                n.DataMap.Set(k, v.(string))
+            }
 
-    case gMSG_REPL_DATA_REMOVE:
-        for _, v := range entry.Items.([]interface{}) {
-            n.DataMap.Remove(v.(string))
-        }
+        case gMSG_REPL_DATA_REMOVE:
+            for _, v := range entry.Items.([]interface{}) {
+                n.DataMap.Remove(v.(string))
+            }
     }
 }
 
@@ -326,7 +317,7 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
             return
         }
         length := len(array)
-        //glog.Debugfln("receive data replication update from: %s, start logid: %d, end logid: %d, size: %d", msg.Info.Name, array[0].Id, array[len(array)-1].Id, length)
+        glog.Debugfln("receive data replication update from: %s, start logid: %d, end logid: %d, size: %d", msg.Info.Name, array[0].Id, array[len(array)-1].Id, length)
         if array != nil && length > 0 {
             n.dmutex.Lock()
             for _, v := range array {
@@ -346,11 +337,11 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
 func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
     // 支持分批同步，如果数据量大，每一次增量同步大小不超过1万条
     logid := info.LastLogId
-    if n.getLastLogId() > info.LastLogId {
+    if n.getLastLogId() > logid {
+        // 不合法的logid，有可能是数据不一致(小概率事件)，也可能是不同集群节点进行合并(人为操作问题)
+        // 这个时候我们总认为Leader是正确的，对节点数据进行强制性覆盖
         if !n.isValidLogId(logid) {
-            glog.Errorfln("invalid log id: %d from %s, maybe it's a node from another cluster, or its data was collapsed.", logid, info.Name)
-            glog.Errorfln("%s is now removed from this cluster, please manually check and repair this error, and then re-add it to cluster.", info.Name)
-            n.Peers.Remove(info.Id)
+            n.checkAndFixNodeData(info)
             return
         }
 
@@ -360,7 +351,7 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
             list   := n.getLogEntriesByLastLogId(logid, 10000, false)
             length := len(list)
             if length > 0 {
-                //glog.Debugfln("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d", n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
+                glog.Debugfln("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d", n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
                 if err := n.sendMsg(conn, gMSG_REPL_DATA_REPLICATION, gjson.Encode(list)); err != nil {
                     glog.Error(err)
                     time.Sleep(time.Second)
@@ -383,71 +374,99 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
     }
 }
 
-// 根据一个非法的logid查找日志中对应的比其下的有效logid，以便做同步
-func (n *Node) getValidLogIdFromGreaterLogId(info *NodeInfo) int64 {
-    var result int64 = -1
+// 对非法logid的节点进行数据修复，机制如下：
+// 寻找两者之间合法的一个logid，从该logid往后进行日志复制及执行
+func (n *Node) checkAndFixNodeData(info *NodeInfo) {
+    checkingKey := "dister_check_and_fix_data_" + info.Id
+    if gcache.Get(checkingKey) != nil {
+        glog.Debugfln("checking and fixing data of node: %s", info.Name)
+        return
+    }
+    glog.Printfln("invalid logid %d from %s, start data checking and fixing...", info.LastLogId, info.Name)
+    gcache.Set(checkingKey, struct {}{}, 3600000)
+    defer gcache.Remove(checkingKey)
+
     logid := info.LastLogId
     for {
-        list   := n.getLogEntriesByLastLogId(logid, 1000, false)
+        // 每批次往前查找1000条日志
+        list   := n.getLogEntriesByLastLogId(logid - 1000*10000, 1000, false)
         length := len(list)
         if length > 0 {
-            // 需要把原始Logid附带过去，以便目标节点做对比
-            ids   := make([]int64, length + 1)
-            ids[0] = logid
+            ids := make([]int64, length + 1)
             for k, v := range list {
-                ids[k + 1] = v.Id
+                if v.Id >= logid {
+                    break;
+                }
+                ids[k] = v.Id
             }
-            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_VALID_LOGID_CHECK, gjson.Encode(ids))
+            glog.Debugfln("sending check logids: %v", ids)
+            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_VALID_LOGID_CHECK_FIX, gjson.Encode(ids))
             if err == nil && msg.Head == gMSG_REPL_RESPONSE {
                 if msg.Body != "" {
-                    r, err := strconv.ParseInt(msg.Body, 10, 64)
-                    if err == nil {
-                        return r
-                    } else {
-                        return result
-                    }
+                    return
                 }
-            } else {
-                return result
             }
-            logid = list[length - 1].Id
+            logid = list[0].Id
         } else {
             break
         }
     }
-    return result
 }
 
-// 两个节点对比有效logid
-func (n *Node) onMsgReplValidLogIdCheck(conn net.Conn, msg *Msg) {
-    var ids []int64
-    result := ""
+// 两个节点对比有效logid，返回一个有效的logid做数据同步
+func (n *Node) onMsgReplValidLogIdCheckFix(conn net.Conn, msg *Msg) {
+    var ids   []int64
+    var result  int64
     if gjson.DecodeTo(msg.Body, &ids) == nil {
         length := len(ids)
         if length > 0 {
-            list := n.getLogEntriesByLastLogId(ids[0], length - 1, false)
+            list := n.getLogEntriesByLastLogId(ids[0] - 1, length, false)
+            glog.Debugfln("check local log entries: %v", list)
             if len(list) > 0 {
                 // 升序
-                for i, id := range ids {
-                    if i == 0 {
-                        continue
-                    }
+                for _, id := range ids {
+                    // 升序
                     for _, v := range list {
-                        if id <= v.Id {
-                            result = strconv.FormatInt(v.Id, 10)
+                        if id == v.Id {
+                            result = v.Id
+                            break
+                        } else if id < v.Id {
                             break
                         }
                     }
-                    if result != "" {
+                    if result > 0 {
                         break
                     }
                 }
-            } else {
-                result = "0"
             }
         }
     }
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, result)
+    // 判断是否logid查找成功
+    if result > 0 {
+        glog.Printfln("data checking and fixing, found valid logid: %d", result)
+        fromid := n.getLogEntryBatachNo(result)*gLOGENTRY_FILE_SIZE*10000
+        // 直接删除物理化数据文件
+        tempid := fromid
+        for {
+            path := n.getLogEntryFileSavePathById(tempid)
+            if gfile.Exists(path) {
+                gfile.Remove(path)
+                tempid += gLOGENTRY_FILE_SIZE
+            } else {
+                break;
+            }
+        }
+        // 获取最近一次同步的logid
+        list := n.getLogEntriesByLastLogId(fromid - 100*gLOGENTRY_FILE_SIZE*10000, 0, false)
+        if len(list) > 0 {
+            fromid = list[len(list) - 1].Id
+        } else {
+            fromid = 0
+        }
+        n.reloadDataMap()
+        n.setLastLogId(fromid)
+    }
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, strconv.FormatInt(result, 10))
 }
 
 

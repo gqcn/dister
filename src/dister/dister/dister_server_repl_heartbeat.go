@@ -305,10 +305,10 @@ func (n *Node) checkValidLogIdFromFile(id int64) bool {
     return false
 }
 
-// 定期清理已经同步完毕的日志列表，注意：***leader和follower都需要清理***
+// 定期清理已经同步完毕的日志列表，注意：***仅仅leader需要清理***
 // 获取所有已存活的节点的最小日志ID，清理本地日志列表中比该ID小的记录(需要在内存中保留最小记录，以便对最新数据做合法性判断)
 func (n *Node) autoCleanLogList() {
-    for {
+    for n.getRaftRole() == gROLE_RAFT_LEADER {
         time.Sleep(gLOG_REPL_LOGCLEAN_INTERVAL * time.Millisecond)
         minLogId := n.getMinLogIdFromPeers()
         if minLogId == 0 {
@@ -331,7 +331,7 @@ func (n *Node) autoCleanLogList() {
 
 // 获取节点中已同步的最小的log id
 func (n *Node) getMinLogIdFromPeers() int64 {
-    var minLogId int64 = n.getLastLogId()
+    minLogId := n.getLastLogId()
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {

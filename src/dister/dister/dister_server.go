@@ -669,13 +669,13 @@ func (n *Node) getServiceFilePath() string {
     return path
 }
 
-// 根据logid计算数据存储的文件绝对路径，每个数据日志文件最大存储10万条记录
+// 根据logid计算数据存储的文件绝对路径，每个数据日志文件最大存储 gLOGENTRY_FILE_SIZE 条记录
 func (n *Node) getLogEntryFileSavePathById(id int64) string {
     return n.getLogEntryFileSavePathByBatchNo(n.getLogEntryBatachNo(id))
 }
 
 // 根据批次号获取日志文件存储绝对路径
-func (n *Node) getLogEntryFileSavePathByBatchNo(no int) string {
+func (n *Node) getLogEntryFileSavePathByBatchNo(no int64) string {
     n.mutex.RLock()
     path := n.SavePath + gfile.Separator + fmt.Sprintf("dister.entry.%d.db", no)
     n.mutex.RUnlock()
@@ -683,8 +683,8 @@ func (n *Node) getLogEntryFileSavePathByBatchNo(no int) string {
 }
 
 // 获得logid存储的批次编号，用于文件存储的分组
-func (n *Node) getLogEntryBatachNo(id int64) int {
-    return int(id/10000/gLOGENTRY_FILE_SIZE)
+func (n *Node) getLogEntryBatachNo(id int64) int64 {
+    return int64(id/10000/gLOGENTRY_FILE_SIZE)
 }
 
 // 添加比分节
@@ -827,6 +827,23 @@ func (n *Node) updatePeerStatus(Id string, status int32) {
 // 改进：固定时间进行比分，看谁的比分更多
 func (n *Node) updateElectionDeadline() {
     atomic.StoreInt64(&n.ElectionDeadline, gtime.Millisecond() + gELECTION_TIMEOUT)
+}
+
+// 丢弃现有的DataMap数据，重新从数据文件中读取数据（**使用请慎重**）
+func (n *Node) reloadDataMap() {
+    var logid int64
+    n.DataMap.Clear()
+    for {
+        list := n.getLogEntriesByLastLogId(logid, 10000, false)
+        if len(list) > 0 {
+            for _, v := range list {
+                n.saveLogEntryToVar(&v)
+                logid = v.Id
+            }
+        } else {
+            break;
+        }
+    }
 }
 
 
