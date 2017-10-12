@@ -570,13 +570,13 @@ func (n *Node) getAllPeers() *[]NodeInfo{
 // 由于一个集群中只会存在一个leader，因此该LogId可以看做唯一性
 func (n *Node) makeLogId() int64 {
     n.mutex.Lock()
-    index := int64(n.LastLogId/10000)
+    index := int64(n.LastLogId/gLOGENTRY_RANDOM_ID_SIZE)
     if n.LogIdIndex < index {
         n.LogIdIndex = index
     }
     n.LogIdIndex++
     // 后四位是随机数，保证出现冲突的概率很小
-    r := n.LogIdIndex*10000 + int64(grand.Rand(0, 9999))
+    r := n.LogIdIndex*gLOGENTRY_RANDOM_ID_SIZE + int64(grand.Rand(0, gLOGENTRY_RANDOM_ID_SIZE - 1))
     n.mutex.Unlock()
     return r
 }
@@ -677,14 +677,14 @@ func (n *Node) getLogEntryFileSavePathById(id int64) string {
 // 根据批次号获取日志文件存储绝对路径
 func (n *Node) getLogEntryFileSavePathByBatchNo(no int64) string {
     n.mutex.RLock()
-    path := n.SavePath + gfile.Separator + fmt.Sprintf("dister.entry.%d.db", no)
+    path := n.SavePath + gfile.Separator + fmt.Sprintf("dister.entry.db/%d/%d", int(no/100), no)
     n.mutex.RUnlock()
     return path
 }
 
 // 获得logid存储的批次编号，用于文件存储的分组
 func (n *Node) getLogEntryBatachNo(id int64) int64 {
-    return int64(id/10000/gLOGENTRY_FILE_SIZE)
+    return int64(id/gLOGENTRY_RANDOM_ID_SIZE/gLOGENTRY_FILE_SIZE)
 }
 
 // 添加比分节

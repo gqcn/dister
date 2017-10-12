@@ -282,7 +282,8 @@ func (n *Node) saveLogEntry(entry *LogEntry) {
 // 保存LogEntry到日志文件中
 func (n *Node) saveLogEntryToFile(entry *LogEntry) {
     c := fmt.Sprintf("%d,%d,%s\n", entry.Id, entry.Act, gjson.Encode(entry.Items))
-    gfile.PutBinContentsAppend(n.getLogEntryFileSavePathById(entry.Id), []byte(c))
+    p := n.getLogEntryFileSavePathById(entry.Id)
+    gfile.PutBinContentsAppend(p, []byte(c))
 }
 
 // 保存LogEntry到内存变量
@@ -323,7 +324,6 @@ func (n *Node) updateDataFromRemoteNode(conn net.Conn, msg *Msg) {
             for _, v := range array {
                 if v.Id > n.getLastLogId() {
                     entry := v
-                    n.LogList.PushFront(&entry)
                     n.saveLogEntry(&entry)
                 }
             }
@@ -388,8 +388,9 @@ func (n *Node) checkAndFixNodeData(info *NodeInfo) {
 
     logid := info.LastLogId
     for {
-        // 每批次往前查找1000条日志
-        list   := n.getLogEntriesByLastLogId(logid - 1000*10000, 1000, false)
+        // 每批次往前查找size条日志
+        size   := 1000
+        list   := n.getLogEntriesByLastLogId(logid - int64(size*gLOGENTRY_RANDOM_ID_SIZE), size, false)
         length := len(list)
         if length > 0 {
             ids := make([]int64, length + 1)
@@ -441,10 +442,10 @@ func (n *Node) onMsgReplValidLogIdCheckFix(conn net.Conn, msg *Msg) {
             }
         }
     }
-    // 判断是否logid查找成功
+    // 判断是否logid查找成功，如果成功那么执行文件脏数据清理工作
     if result > 0 {
         glog.Printfln("data checking and fixing, found valid logid: %d", result)
-        fromid := n.getLogEntryBatachNo(result)*gLOGENTRY_FILE_SIZE*10000
+        fromid := n.getLogEntryBatachNo(result)*gLOGENTRY_FILE_SIZE*gLOGENTRY_RANDOM_ID_SIZE
         // 直接删除物理化数据文件
         tempid := fromid
         for {
@@ -457,7 +458,7 @@ func (n *Node) onMsgReplValidLogIdCheckFix(conn net.Conn, msg *Msg) {
             }
         }
         // 获取最近一次同步的logid
-        list := n.getLogEntriesByLastLogId(fromid - 100*gLOGENTRY_FILE_SIZE*10000, 0, false)
+        list := n.getLogEntriesByLastLogId(fromid - 100*gLOGENTRY_FILE_SIZE*gLOGENTRY_RANDOM_ID_SIZE, 0, false)
         if len(list) > 0 {
             fromid = list[len(list) - 1].Id
         } else {

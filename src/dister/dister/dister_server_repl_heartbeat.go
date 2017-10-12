@@ -241,7 +241,7 @@ func (n *Node) getLogEntryListFromFileByLogId(logid int64, max int, check bool) 
             break
         }
         // 下一批次，注意后四位是随机数，所以这里要乘以10000
-        id += gLOGENTRY_FILE_SIZE*10000
+        id += gLOGENTRY_FILE_SIZE*gLOGENTRY_RANDOM_ID_SIZE
     }
     return array
 }
@@ -305,7 +305,7 @@ func (n *Node) checkValidLogIdFromFile(id int64) bool {
     return false
 }
 
-// 定期清理已经同步完毕的日志列表，注意：***仅仅leader需要清理***
+// 定期清理已经同步完毕的日志列表，注意：***仅leader需要清理***
 // 获取所有已存活的节点的最小日志ID，清理本地日志列表中比该ID小的记录(需要在内存中保留最小记录，以便对最新数据做合法性判断)
 func (n *Node) autoCleanLogList() {
     for n.getRaftRole() == gROLE_RAFT_LEADER {

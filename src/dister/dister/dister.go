@@ -33,6 +33,7 @@ const (
     gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩(开发阶段使用)
     gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容(开发阶段使用)
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
+    gLOGENTRY_RANDOM_ID_SIZE                = 10000   // 每个LogEntry的ID生成随机数的长度：10000表示4个随机数，1000表示3个，以此类推
 
     // 集群端口定义
     gPORT_RAFT                              = 4166    // 集群协议通信接口
