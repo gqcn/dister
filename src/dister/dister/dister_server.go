@@ -677,7 +677,7 @@ func (n *Node) getLogEntryFileSavePathById(id int64) string {
 // 根据批次号获取日志文件存储绝对路径
 func (n *Node) getLogEntryFileSavePathByBatchNo(no int64) string {
     n.mutex.RLock()
-    path := n.SavePath + gfile.Separator + fmt.Sprintf("dister.entry.db/%d/%d", int(no/100), no)
+    path := n.SavePath + gfile.Separator + fmt.Sprintf("dister.entry.log/%d/%d", int(no/100), no)
     n.mutex.RUnlock()
     return path
 }
@@ -845,6 +845,3 @@ func (n *Node) reloadDataMap() {
         }
     }
 }
-
-
-

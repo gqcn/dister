@@ -13,7 +13,6 @@ import (
     "fmt"
     "g/os/gcache"
     "io"
-    "g/core/types/gset"
     "regexp"
     "strconv"
 )
@@ -33,40 +32,35 @@ func (n *Node) replicationHandler() {
     go n.autoCleanLogList()
 }
 
-// 日志自动同步检查，每一个节点保持一个线程检查，保证同步能够快速进行
-// 注意：这里只同步数据给server，client节点不需要存储任何数据
+// 日志自动同步检查，这里只同步数据给server，client节点不需要存储任何数据
 func (n *Node) dataReplicationLoop() {
-    // 存储已经保持心跳的节点
-    conns := gset.NewStringSet()
     for {
         if n.getRaftRole() == gROLE_RAFT_LEADER {
             for _, v := range n.Peers.Values() {
                 info := v.(NodeInfo)
-                if info.Role != gROLE_SERVER || info.Status != gSTATUS_ALIVE || conns.Contains(info.Id) || info.Id == n.getId() {
+                if info.Role != gROLE_SERVER || info.Status != gSTATUS_ALIVE || info.Id == n.getId() {
                     continue
                 }
-                go func(id, ip string) {
-                    conns.Add(id)
-                    defer conns.Remove(id)
-                    for {
-                        // 如果当前节点不再是leader，或者节点表中已经删除该节点信息
-                        if n.getRaftRole() != gROLE_RAFT_LEADER || !n.Peers.Contains(id) {
+                // 需要同步时重新创建链接，同步完毕则关闭
+                if n.getLastLogId() > info.LastLogId {
+                    go func(info *NodeInfo) {
+                        key  := fmt.Sprintf("dister_data_replication_%s", info.Id)
+                        if gcache.Get(key) != nil {
                             return
                         }
-                        info := n.Peers.Get(id).(NodeInfo)
-                        if n.getLastLogId() > info.LastLogId {
-                            conn := n.getConn(ip, gPORT_REPL)
-                            if conn != nil {
-                                n.updateDataToRemoteNode(conn, &info)
-                                conn.Close()
-                            }
+                        gcache.Set(key, struct {}{}, 3600000)
+                        defer gcache.Remove(key)
+
+                        conn := n.getConn(info.Ip, gPORT_REPL)
+                        if conn != nil {
+                            n.updateDataToRemoteNode(conn, info)
+                            conn.Close()
                         }
-                        time.Sleep(gLOG_REPL_DATA_UPDATE_INTERVAL * time.Millisecond)
-                    }
-                }(info.Id, info.Ip)
+                    }(&info)
+                }
             }
         }
-        time.Sleep(1000 * time.Millisecond)
+        time.Sleep(gLOG_REPL_DATA_UPDATE_INTERVAL * time.Millisecond)
     }
 }
 
@@ -308,24 +302,26 @@ func (n *Node) checkValidLogIdFromFile(id int64) bool {
 // 定期清理已经同步完毕的日志列表，注意：***仅leader需要清理***
 // 获取所有已存活的节点的最小日志ID，清理本地日志列表中比该ID小的记录(需要在内存中保留最小记录，以便对最新数据做合法性判断)
 func (n *Node) autoCleanLogList() {
-    for n.getRaftRole() == gROLE_RAFT_LEADER {
-        time.Sleep(gLOG_REPL_LOGCLEAN_INTERVAL * time.Millisecond)
-        minLogId := n.getMinLogIdFromPeers()
-        if minLogId == 0 {
-            continue
-        }
-        p := n.LogList.Back()
-        for p != nil {
-            entry := p.Value.(*LogEntry)
-            if entry.Id < minLogId {
-                //glog.Printfln("auto clean log id: %d", entry.Id)
-                t := p.Prev()
-                n.LogList.Remove(p)
-                p  = t
-            } else {
-                break;
+    for {
+        if n.getRaftRole() == gROLE_RAFT_LEADER {
+            minLogId := n.getMinLogIdFromPeers()
+            if minLogId == 0 {
+                continue
+            }
+            p := n.LogList.Back()
+            for p != nil {
+                entry := p.Value.(*LogEntry)
+                if entry.Id < minLogId {
+                    //glog.Printfln("auto clean log id: %d", entry.Id)
+                    t := p.Prev()
+                    n.LogList.Remove(p)
+                    p  = t
+                } else {
+                    break;
+                }
             }
         }
+        time.Sleep(gLOG_REPL_LOGCLEAN_INTERVAL * time.Millisecond)
     }
 }
 

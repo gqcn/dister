@@ -344,7 +344,6 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
             n.checkAndFixNodeData(info)
             return
         }
-
         //glog.Println("start data incremental replication from", n.getName(), "to", info.Name)
         for {
             // 每批次的数据量要考虑到目标节点写入的时间会不会超过TCP读取等待超时时间
@@ -403,7 +402,7 @@ func (n *Node) checkAndFixNodeData(info *NodeInfo) {
             glog.Debugfln("sending check logids: %v", ids)
             msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_VALID_LOGID_CHECK_FIX, gjson.Encode(ids))
             if err == nil && msg.Head == gMSG_REPL_RESPONSE {
-                if msg.Body != "" {
+                if msg.Body != "-1" {
                     return
                 }
             }
@@ -415,23 +414,42 @@ func (n *Node) checkAndFixNodeData(info *NodeInfo) {
 }
 
 // 两个节点对比有效logid，返回一个有效的logid做数据同步
+// 机制：保证至少连续3对logid匹配，并且匹配的时候如果遇到匹配的logid，必须保证其后的所有logid都连续匹配
 func (n *Node) onMsgReplValidLogIdCheckFix(conn net.Conn, msg *Msg) {
     var ids   []int64
-    var result  int64
+    var result  int64 = -1
     if gjson.DecodeTo(msg.Body, &ids) == nil {
         length := len(ids)
         if length > 0 {
-            list := n.getLogEntriesByLastLogId(ids[0] - 1, length, false)
+            list    := n.getLogEntriesByLastLogId(ids[0] - 1, length, false)
+            length2 := len(list)
             glog.Debugfln("check local log entries: %v", list)
-            if len(list) > 0 {
+            if length2 > 0 {
                 // 升序
-                for _, id := range ids {
+                for k, id := range ids {
                     // 升序
-                    for _, v := range list {
-                        if id == v.Id {
-                            result = v.Id
-                            break
-                        } else if id < v.Id {
+                    for k2, entry := range list {
+                        if id == entry.Id {
+                            // 保证至少连续3对logid匹配
+                            if length - k >= 3 && length2 - k2 >= 3 {
+                                // 保证其后的所有logid都连续匹配
+                                math := true
+                                i := k  + 1
+                                j := k2 + 1
+                                for ; k < length; {
+                                    if ids[i] != list[j].Id {
+                                        math = false
+                                        break
+                                    }
+                                    i++
+                                    j++
+                                }
+                                if math {
+                                    result = entry.Id
+                                }
+                                break
+                            }
+                        } else if id < entry.Id {
                             break
                         }
                     }
@@ -444,30 +462,43 @@ func (n *Node) onMsgReplValidLogIdCheckFix(conn net.Conn, msg *Msg) {
     }
     // 判断是否logid查找成功，如果成功那么执行文件脏数据清理工作
     if result > 0 {
-        glog.Printfln("data checking and fixing, found valid logid: %d", result)
-        fromid := n.getLogEntryBatachNo(result)*gLOGENTRY_FILE_SIZE*gLOGENTRY_RANDOM_ID_SIZE
-        // 直接删除物理化数据文件
-        tempid := fromid
-        for {
-            path := n.getLogEntryFileSavePathById(tempid)
-            if gfile.Exists(path) {
-                gfile.Remove(path)
-                tempid += gLOGENTRY_FILE_SIZE
-            } else {
-                break;
-            }
-        }
-        // 获取最近一次同步的logid
-        list := n.getLogEntriesByLastLogId(fromid - 100*gLOGENTRY_FILE_SIZE*gLOGENTRY_RANDOM_ID_SIZE, 0, false)
-        if len(list) > 0 {
-            fromid = list[len(list) - 1].Id
-        } else {
-            fromid = 0
-        }
-        n.reloadDataMap()
-        n.setLastLogId(fromid)
+        n.fixDataMapByLogId(result)
     }
     n.sendMsg(conn, gMSG_REPL_RESPONSE, strconv.FormatInt(result, 10))
+}
+
+// (当数据不一致时)从某一个logid开始修复数据，这个logid是与leader匹配的合法logid
+// 机制：将匹配的logid其后的内容去掉，通过另外数据自动同步线程进行更新
+func (n *Node) fixDataMapByLogId(logid int64) {
+    glog.Printfln("data checking and fixing, found valid logid: %d", logid)
+    fromid := n.getLogEntryBatachNo(logid)*gLOGENTRY_FILE_SIZE*gLOGENTRY_RANDOM_ID_SIZE
+    list   := n.getLogEntriesByLastLogId(fromid, int((logid - fromid)/gLOGENTRY_RANDOM_ID_SIZE), false)
+    // 直接删除logid当前文件其后的存储文件
+    tempid := logid
+    for {
+        path := n.getLogEntryFileSavePathById(tempid)
+        if gfile.Exists(path) {
+            gfile.Remove(path)
+            tempid += gLOGENTRY_FILE_SIZE
+        } else {
+            break;
+        }
+    }
+    // 将内容重新还原到logid对应的文件中
+    if len(list) > 0 {
+        for _, v := range list {
+            if v.Id > logid {
+                break;
+            }
+            entry := v
+            n.saveLogEntryToFile(&entry)
+            fromid = v.Id
+        }
+    } else {
+        fromid = 0
+    }
+    n.reloadDataMap()
+    n.setLastLogId(fromid)
 }
 
 
