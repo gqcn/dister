@@ -23,8 +23,8 @@ import (
     "strings"
     "g/encoding/gcompress"
     "g/os/gconsole"
-    "g/encoding/gcrc32"
     "fmt"
+    "g/encoding/ghash"
 )
 
 const (
@@ -275,7 +275,7 @@ func nodeId() string {
     if mac == "" {
         glog.Fatalln("getting local MAC address failed")
     }
-    return strings.ToUpper(fmt.Sprintf("%x", gcrc32.EncodeString(mac)))
+    return strings.ToUpper(fmt.Sprintf("%x", ghash.BKDRHash([]byte(mac))))
 }
 
 // 获取数据
