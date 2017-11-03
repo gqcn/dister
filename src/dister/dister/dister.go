@@ -25,6 +25,7 @@ import (
     "g/os/gconsole"
     "fmt"
     "g/encoding/ghash"
+    "g/database/gkvdb"
 )
 
 const (
@@ -122,7 +123,7 @@ type Node struct {
     Id                   string                   // 节点ID(根据算法自动生成的集群唯一名称)
     Name                 string                   // 节点主机名称
     Ip                   string                   // 主机节点的ip，由通信的时候进行填充，
-                                                 // 一个节点可能会有多个IP，这里保存最近通信的那个，节点唯一性识别使用的是Name字段
+                                                  // 一个节点可能会有多个IP，这里保存最近通信的那个，节点唯一性识别使用的是Name字段
     CfgFilePath          string                   // 配置文件绝对路径
     CfgReplicated        bool                     // 本地配置对象是否已同步到leader(配置同步需要注意覆盖问题)
     Peers                *gmap.StringInterfaceMap // 集群所有的节点信息(ip->节点信息)，不包含自身
@@ -141,8 +142,8 @@ type Node struct {
     LogList              *glist.SafeList          // 日志列表，用以存储临时的消息日志，以便快速进行数据同步到其他节点，仅在Leader节点存储
     ServiceList          *glist.SafeList          // Service同步事件列表，用以Service同步
     SavePath             string                   // 物理存储的本地数据*目录*绝对路径
-    Service              *gmap.StringInterfaceMap // 存储的服务配置表
-    DataMap              *gmap.StringStringMap    // 存储的K-V哈希表
+    Service              *gkvdb.DB                // 存储的服务配置表
+    DataMap              *gkvdb.DB                // 存储的K-V哈希表
 }
 
 // 服务节点对象(用于程序更新及检索结构)
@@ -231,8 +232,6 @@ func NewServer() *Node {
         SavePath            : gfile.SelfDir(),
         LogList             : glist.NewSafeList(),
         ServiceList         : glist.NewSafeList(),
-        Service             : gmap.NewStringInterfaceMap(),
-        DataMap             : gmap.NewStringStringMap(),
     }
     ips, err := gip.IntranetIP()
     if err == nil && len(ips) == 1 {

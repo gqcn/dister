@@ -10,14 +10,10 @@ import (
 func (n *Node) getDataByApi(k string) string {
     var r ghttp.ResponseJson
     if k == "" {
-        if n.DataMap.Size() > 1000 {
-            r = ghttp.ResponseJson{0, "too large data size, need a key to search", nil}
-        } else {
-            r = ghttp.ResponseJson{1, "ok", *n.DataMap.Clone()}
-        }
+        r = ghttp.ResponseJson{0, "need a key to search", nil}
     } else {
-        if n.DataMap.Contains(k) {
-            r = ghttp.ResponseJson{1, "ok", n.DataMap.Get(k)}
+        if v := n.DataMap.Get([]byte(k)); v != nil {
+            r = ghttp.ResponseJson{1, "ok", string(v)}
         } else {
             r = ghttp.ResponseJson{0, "data not found", nil}
         }

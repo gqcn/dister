@@ -20,6 +20,7 @@ import (
     "sync/atomic"
     "g/encoding/gbinary"
     "strconv"
+    "g/database/gkvdb"
 )
 
 // 获取Msg，使用默认的超时时间
@@ -93,19 +94,19 @@ func (n *Node) encodeMsg(head int, body string, info *NodeInfo) ([]byte, error) 
 
 // 对Msg进行二进制解包
 func (n *Node) decodeMsg(b []byte) *Msg {
-    head, _       := gbinary.DecodeToInt32 (b)
-    bodySize, _   := gbinary.DecodeToInt32 (b[4:])
-    bodyBytes, _  := gbinary.DecodeToBytes (b[8:], bodySize)
-    nameSize, _   := gbinary.DecodeToInt32 (b[8 + bodySize:])
-    nameBytes, _  := gbinary.DecodeToBytes (b[8 + bodySize + 4:], nameSize)
-    groupSize, _  := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize:])
-    groupBytes, _ := gbinary.DecodeToBytes (b[8 + bodySize + 4 + nameSize + 4:], groupSize)
-    id, _         := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize:])
-    iplong, _     := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize + 4:])
-    role, _       := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 8:])
-    raft, _       := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 12:])
-    logid, _      := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 16:])
-    sid, _        := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 24:])
+    head          := gbinary.DecodeToInt32 (b)
+    bodySize      := gbinary.DecodeToInt32 (b[4:])
+    bodyBytes     := b[8 : bodySize]
+    nameSize      := gbinary.DecodeToInt32 (b[8 + bodySize:])
+    nameBytes     := b[8 + bodySize + 4 : nameSize]
+    groupSize     := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize:])
+    groupBytes    := b[8 + bodySize + 4 + nameSize + 4 : groupSize]
+    id            := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize:])
+    iplong        := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize + 4:])
+    role          := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 8:])
+    raft          := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 12:])
+    logid         := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 16:])
+    sid           := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 24:])
     version       := b[8 + bodySize + 4 + nameSize + 4 + groupSize + 32:]
     return &Msg {
         Head: int(head),
@@ -160,6 +161,24 @@ func (n *Node) getConn(ip string, port int) net.Conn {
     return nil
 }
 
+// 初始化本地KV数据库
+func (n *Node) initLocalDb() {
+    // 初始化DataMap数据库
+    db, err := gkvdb.New(n.getDataFilePath())
+    if err != nil {
+        glog.Fatalln(err)
+    } else {
+        n.DataMap = db
+    }
+    // 初始化Service数据库
+    db, err  = gkvdb.New(n.getServiceFilePath())
+    if err != nil {
+        glog.Fatalln(err)
+    } else {
+        n.Service = db
+    }
+}
+
 // 运行节点
 func (n *Node) Run() {
     // 命令行操作
@@ -174,6 +193,9 @@ func (n *Node) Run() {
 
     // 读取命令行参数
     n.initFromCommand()
+
+    // 初始化本地数据库
+    n.initLocalDb()
 
     // 初始化节点数据
     n.restoreFromFile()
@@ -771,30 +793,12 @@ func (n *Node) setLastServiceLogId(id int64) {
     atomic.StoreInt64(&n.LastServiceLogId, id)
 }
 
-func (n *Node) setService(m *gmap.StringInterfaceMap) {
-    if m == nil {
-        return
-    }
-    n.mutex.Lock()
-    n.Service = m
-    n.mutex.Unlock()
-}
-
 func (n *Node) setPeers(m *gmap.StringInterfaceMap) {
     if m == nil {
         return
     }
     n.mutex.Lock()
     n.Peers = m
-    n.mutex.Unlock()
-}
-
-func (n *Node) setDataMap(m *gmap.StringStringMap) {
-    if m == nil {
-        return
-    }
-    n.mutex.Lock()
-    n.DataMap = m
     n.mutex.Unlock()
 }
 
