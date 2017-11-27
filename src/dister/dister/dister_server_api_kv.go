@@ -4,11 +4,11 @@
 package dister
 
 import (
-    "g/net/ghttp"
-    "g/encoding/gjson"
     "fmt"
     "errors"
-    "g/os/gcache"
+    "gitee.com/johng/gf/g/os/gcache"
+    "gitee.com/johng/gf/g/net/ghttp"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 

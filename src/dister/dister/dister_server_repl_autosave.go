@@ -4,13 +4,13 @@
 package dister
 
 import (
-    "g/encoding/gjson"
     "time"
-    "g/os/gfile"
-    "g/os/glog"
-    "g/encoding/gcompress"
     "sync"
-    "g/os/gcache"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/os/gfile"
+    "gitee.com/johng/gf/g/os/gcache"
+    "gitee.com/johng/gf/g/encoding/gjson"
+    "gitee.com/johng/gf/g/encoding/gcompress"
 )
 
 // 日志自动保存处理

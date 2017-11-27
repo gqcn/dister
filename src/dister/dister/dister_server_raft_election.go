@@ -3,9 +3,9 @@ package dister
 import (
     "sync"
     "time"
-    "g/util/gtime"
-    "g/os/glog"
-    "g/encoding/gjson"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // 服务器节点选举

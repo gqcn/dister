@@ -10,21 +10,21 @@ package dister
 
 import (
     "os"
-    "g/core/types/gmap"
     "sync"
-    "g/core/types/glist"
-    "g/net/ghttp"
-    "g/os/glog"
-    "g/os/gfile"
     "net"
     "time"
     "io"
-    "g/net/gip"
     "strings"
-    "g/encoding/gcompress"
-    "g/os/gconsole"
     "fmt"
-    "g/encoding/ghash"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/net/gip"
+    "gitee.com/johng/gf/g/os/gfile"
+    "gitee.com/johng/gf/g/net/ghttp"
+    "gitee.com/johng/gf/g/os/gconsole"
+    "gitee.com/johng/gf/g/encoding/ghash"
+    "gitee.com/johng/gf/g/container/gmap"
+    "gitee.com/johng/gf/g/container/glist"
+    "gitee.com/johng/gf/g/encoding/gcompress"
 )
 
 const (

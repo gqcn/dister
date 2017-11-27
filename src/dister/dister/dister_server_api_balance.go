@@ -1,13 +1,13 @@
 package dister
 
 import (
-    "g/net/ghttp"
     "fmt"
     "errors"
-    "g/util/grand"
     "strconv"
-    "g/os/gcache"
-    "g/encoding/gjson"
+    "gitee.com/johng/gf/g/net/ghttp"
+    "gitee.com/johng/gf/g/os/gcache"
+    "gitee.com/johng/gf/g/util/grand"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // 用于负载均衡计算的结构体

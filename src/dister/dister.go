@@ -6,7 +6,7 @@
 package main
 
 import (
-    "dister/dister"
+    "gitee.com/johng/dister/src/dister/dister"
 )
 
 func main() {

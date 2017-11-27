@@ -4,8 +4,8 @@
 package dister
 
 import (
-    "g/net/ghttp"
-    "g/encoding/gjson"
+    "gitee.com/johng/gf/g/net/ghttp"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // 查询Peers

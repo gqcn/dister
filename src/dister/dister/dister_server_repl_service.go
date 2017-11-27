@@ -3,18 +3,18 @@ package dister
 import (
     "time"
     "strings"
-    "g/database/gdb"
-    "g/net/ghttp"
     "strconv"
-    "g/os/gcache"
     "os/exec"
     "fmt"
-    "g/util/gtime"
-    "g/os/glog"
     "errors"
     "regexp"
     "sync"
-    "g/encoding/gjson"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/os/gcache"
+    "gitee.com/johng/gf/g/net/ghttp"
+    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/database/gdb"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // 用于Service API操作的读写锁

@@ -2,8 +2,8 @@ package dister
 
 import (
     "net"
-    "g/os/glog"
-    "g/encoding/gjson"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // 集群协议通信接口回调函数

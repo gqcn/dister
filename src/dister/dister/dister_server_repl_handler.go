@@ -4,17 +4,17 @@ package dister
 
 import (
     "net"
-    "g/encoding/gjson"
-    "g/core/types/gmap"
-    "g/util/gtime"
-    "g/os/glog"
     "time"
     "fmt"
-    "g/core/types/gset"
     "strconv"
-    "g/os/gfile"
     "sync/atomic"
-    "g/os/gcache"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/os/gfile"
+    "gitee.com/johng/gf/g/os/gcache"
+    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/container/gset"
+    "gitee.com/johng/gf/g/encoding/gjson"
+    "gitee.com/johng/gf/g/container/gmap"
 )
 
 // 集群数据同步接口回调函数

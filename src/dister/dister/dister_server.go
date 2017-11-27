@@ -2,24 +2,24 @@ package dister
 
 import (
     "time"
-    "g/net/gip"
-    "g/net/gtcp"
     "net"
     "fmt"
-    "g/util/gtime"
-    "g/core/types/gmap"
-    "g/os/gfile"
-    "g/net/ghttp"
-    "g/os/gconsole"
-    "g/encoding/gjson"
-    "g/os/glog"
     "strings"
     "os"
     "errors"
-    "g/util/grand"
     "sync/atomic"
-    "g/encoding/gbinary"
     "strconv"
+    "gitee.com/johng/gf/g/os/gfile"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/net/gip"
+    "gitee.com/johng/gf/g/net/gtcp"
+    "gitee.com/johng/gf/g/net/ghttp"
+    "gitee.com/johng/gf/g/util/grand"
+    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/os/gconsole"
+    "gitee.com/johng/gf/g/container/gmap"
+    "gitee.com/johng/gf/g/encoding/gjson"
+    "gitee.com/johng/gf/g/encoding/gbinary"
 )
 
 // 获取Msg，使用默认的超时时间
@@ -93,19 +93,19 @@ func (n *Node) encodeMsg(head int, body string, info *NodeInfo) ([]byte, error) 
 
 // 对Msg进行二进制解包
 func (n *Node) decodeMsg(b []byte) *Msg {
-    head, _       := gbinary.DecodeToInt32 (b)
-    bodySize, _   := gbinary.DecodeToInt32 (b[4:])
-    bodyBytes, _  := gbinary.DecodeToBytes (b[8:], bodySize)
-    nameSize, _   := gbinary.DecodeToInt32 (b[8 + bodySize:])
-    nameBytes, _  := gbinary.DecodeToBytes (b[8 + bodySize + 4:], nameSize)
-    groupSize, _  := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize:])
-    groupBytes, _ := gbinary.DecodeToBytes (b[8 + bodySize + 4 + nameSize + 4:], groupSize)
-    id, _         := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize:])
-    iplong, _     := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize + 4:])
-    role, _       := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 8:])
-    raft, _       := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 12:])
-    logid, _      := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 16:])
-    sid, _        := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 24:])
+    head          := gbinary.DecodeToInt32 (b)
+    bodySize      := gbinary.DecodeToInt32 (b[4:])
+    bodyBytes     := b[8 : 8 + bodySize]
+    nameSize      := gbinary.DecodeToInt32 (b[8 + bodySize:])
+    nameBytes     := b[8 + bodySize + 4 : 8 + bodySize + 4 + nameSize]
+    groupSize     := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize:])
+    groupBytes    := b[8 + bodySize + 4 + nameSize + 4 : 8 + bodySize + 4 + nameSize + 4 + groupSize]
+    id            := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize:])
+    iplong        := gbinary.DecodeToUint32(b[8 + bodySize + 4 + nameSize + 4 + groupSize + 4:])
+    role          := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 8:])
+    raft          := gbinary.DecodeToInt32 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 12:])
+    logid         := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 16:])
+    sid           := gbinary.DecodeToInt64 (b[8 + bodySize + 4 + nameSize + 4 + groupSize + 24:])
     version       := b[8 + bodySize + 4 + nameSize + 4 + groupSize + 32:]
     return &Msg {
         Head: int(head),

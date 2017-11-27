@@ -2,8 +2,8 @@ package dister
 
 import (
     "time"
-    "g/core/types/gset"
-    "g/os/glog"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/container/gset"
 )
 
 // 通过心跳维持集群统治，如果心跳不及时，那么选民会重新进入选举流程

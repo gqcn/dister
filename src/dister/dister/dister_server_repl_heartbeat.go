@@ -4,17 +4,17 @@
 package dister
 
 import (
-    "g/encoding/gjson"
     "time"
-    "g/os/gfile"
     "os"
     "bufio"
-    "g/os/glog"
     "fmt"
-    "g/os/gcache"
     "io"
     "regexp"
     "strconv"
+    "gitee.com/johng/gf/g/os/glog"
+    "gitee.com/johng/gf/g/os/gfile"
+    "gitee.com/johng/gf/g/os/gcache"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // leader到其他节点的数据同步监听

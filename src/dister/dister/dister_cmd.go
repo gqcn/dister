@@ -1,14 +1,14 @@
 package dister
 
 import (
-    "g/os/gconsole"
     "strings"
     "fmt"
-    "g/net/ghttp"
-    "g/encoding/gjson"
-    "g/os/gfile"
     "encoding/json"
     "strconv"
+    "gitee.com/johng/gf/g/os/gfile"
+    "gitee.com/johng/gf/g/net/ghttp"
+    "gitee.com/johng/gf/g/os/gconsole"
+    "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // 显示帮助信息
