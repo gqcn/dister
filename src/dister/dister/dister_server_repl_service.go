@@ -12,7 +12,7 @@ import (
     "gitee.com/johng/gf/g/os/glog"
     "gitee.com/johng/gf/g/os/gcache"
     "gitee.com/johng/gf/g/net/ghttp"
-    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/os/gtime"
     "gitee.com/johng/gf/g/database/gdb"
     "gitee.com/johng/gf/g/encoding/gjson"
 )

@@ -4,7 +4,7 @@ import (
     "sync"
     "time"
     "gitee.com/johng/gf/g/os/glog"
-    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/os/gtime"
     "gitee.com/johng/gf/g/encoding/gjson"
 )
 

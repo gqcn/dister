@@ -11,7 +11,7 @@ import (
     "gitee.com/johng/gf/g/os/glog"
     "gitee.com/johng/gf/g/os/gfile"
     "gitee.com/johng/gf/g/os/gcache"
-    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/os/gtime"
     "gitee.com/johng/gf/g/container/gset"
     "gitee.com/johng/gf/g/encoding/gjson"
     "gitee.com/johng/gf/g/container/gmap"

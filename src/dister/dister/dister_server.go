@@ -15,7 +15,7 @@ import (
     "gitee.com/johng/gf/g/net/gtcp"
     "gitee.com/johng/gf/g/net/ghttp"
     "gitee.com/johng/gf/g/util/grand"
-    "gitee.com/johng/gf/g/util/gtime"
+    "gitee.com/johng/gf/g/os/gtime"
     "gitee.com/johng/gf/g/os/gconsole"
     "gitee.com/johng/gf/g/container/gmap"
     "gitee.com/johng/gf/g/encoding/gjson"
