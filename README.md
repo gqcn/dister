@@ -1,9 +1,9 @@
-# 安装
+## 安装
 1. 建议下载预编译好的各平台版本使用，下载地址：[https://gitee.com/johng/dists](https://gitee.com/johng/dists)
 2. 源码编译安装，需要gf框架的支持，框架地址：[https://gitee.com/johng/gf](https://gitee.com/johng/gf)
 
 
-# 介绍
+## 介绍
 dister(Distribution Cluster)是一款轻量级高性能的分布式集群管理软件，实现了分布式软件架构中的常用核心组件，包括：
 1. 服务配置管理中心;
 2. 服务注册与发现;
@@ -13,7 +13,7 @@ dister(Distribution Cluster)是一款轻量级高性能的分布式集群管理�
 dister的灵感来源于ZooKeeper及Consul，它们都实现了类似的分布式组件，但是dister更加的轻量级、低成本、易维护、架构清晰、简单实用、性能高效，这也是dister设计的初衷。
 
 
-# 特点
+## 特点
 
 1. 开源、免费、跨平台；
 1. 使用RAFT算法实现分布式一致性；
@@ -24,7 +24,7 @@ dister的灵感来源于ZooKeeper及Consul，它们都实现了类似的分布�
 1. 配置管理简单，且仅提供实用的API接口以及终端管理命令，轻量级、低成本、易维护；
 
 
-# 文档
+## 文档
 
 官方网站：http://johng.cn/dister
 
