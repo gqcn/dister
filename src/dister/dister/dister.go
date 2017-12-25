@@ -17,7 +17,7 @@ import (
     "strings"
     "fmt"
     "gitee.com/johng/gf/g/os/glog"
-    "gitee.com/johng/gf/g/net/gip"
+    "gitee.com/johng/gf/g/net/gipv4"
     "gitee.com/johng/gf/g/os/gfile"
     "gitee.com/johng/gf/g/net/ghttp"
     "gitee.com/johng/gf/g/os/gconsole"
@@ -29,8 +29,8 @@ import (
 
 const (
     gVERSION                                = "1.6"   // 当前版本
-    gDEBUG                                  = true    // 用于控制调试信息(开发阶段使用)
-    gCOMPRESS_COMMUNICATION                 = true    // 是否在通信时进行内容压缩(开发阶段使用)
+    gDEBUG                                  = false   // 用于控制调试信息(开发阶段使用)
+    gCOMPRESS_COMMUNICATION                 = false   // 是否在通信时进行内容压缩(开发阶段使用)
     gCOMPRESS_SAVING                        = false   // 是否在存储时压缩内容(开发阶段使用)
     gLOGENTRY_FILE_SIZE                     = 100000  // 每个LogEntry存储文件的最大存储数量，不能随意改动
     gLOGENTRY_RANDOM_ID_SIZE                = 10000   // 每个LogEntry的ID生成随机数的长度：10000表示4个随机数，1000表示3个，以此类推
@@ -39,8 +39,6 @@ const (
     gPORT_RAFT                              = 4166    // 集群协议通信接口
     gPORT_REPL                              = 4167    // 集群数据同步接口
     gPORT_API                               = 4168    // 服务器对外API接口
-    //gPORT_MONITOR                           = 4169    // 监控服务接口
-    //gPORT_WEBUI                             = 4170    // WEB管理界面
 
     // 节点状态
     gSTATUS_DEAD                            = 0
@@ -105,13 +103,6 @@ const (
     gMSG_API_SERVICE_SET                    = 540
     gMSG_API_SERVICE_REMOVE                 = 550
 )
-
-// 消息
-type Msg struct {
-    Head int
-    Body string
-    Info NodeInfo
-}
 
 // 服务器节点信息
 type Node struct {
@@ -182,12 +173,6 @@ type NodeApiBalance struct {
     node *Node
 }
 
-// 用于Monitor WebUI对象
-type MonitorWebUI struct {
-    ghttp.Controller
-    node *Node
-}
-
 // 节点信息
 type NodeInfo struct {
     Name             string `json:"name"`
@@ -207,6 +192,13 @@ type LogEntry struct {
     Id               int64                  // 唯一ID
     Act              int
     Items            interface{}            // map[string]string或[]string
+}
+
+// 消息
+type Msg struct {
+    Head int
+    Body string
+    Info NodeInfo
 }
 
 // 绑定本地IP并创建一个服务节点
@@ -234,10 +226,11 @@ func NewServer() *Node {
         Service             : gmap.NewStringInterfaceMap(),
         DataMap             : gmap.NewStringStringMap(),
     }
-    ips, err := gip.IntranetIP()
+    ips, err := gipv4.IntranetIP()
     if err == nil && len(ips) == 1 {
         node.Ip = ips[0]
     }
+
     // 命令行操作绑定
     gconsole.BindHandle("nodes",      cmd_nodes)
     gconsole.BindHandle("addnode",    cmd_addnode)

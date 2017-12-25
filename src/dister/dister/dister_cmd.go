@@ -9,6 +9,7 @@ import (
     "gitee.com/johng/gf/g/net/ghttp"
     "gitee.com/johng/gf/g/os/gconsole"
     "gitee.com/johng/gf/g/encoding/gjson"
+    "gitee.com/johng/gf/g/os/glog"
 )
 
 // 显示帮助信息
@@ -33,7 +34,7 @@ func cmd_help () {
 // 查看集群节点
 // 使用方式：dister nodes
 func cmd_nodes () {
-    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API))
+    r, _ := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API))
     if r == nil {
         fmt.Println("ERROR: connect to local dister api failed")
         return
@@ -41,18 +42,21 @@ func cmd_nodes () {
     defer r.Close()
     content := r.ReadAll()
     peers   := make([]NodeInfo, 0)
-    jsonvar := gjson.DecodeToJson(content)
-    err := jsonvar.GetToVar("data", &peers)
+    j, err  := gjson.DecodeToJson(content)
     if err != nil {
-        fmt.Println(err)
+        glog.Error(err)
     } else {
-        fmt.Printf("%12s %25s %25s %15s %12s %12s %10s\n", "Id", "Name", "Group", "Ip", "Type", "Role", "Status")
-        for _,v := range peers {
-            status := "alive"
-            if v.Status == 0 {
-                status = "dead"
+        if err := j.GetToVar("data", &peers); err != nil {
+            glog.Error(err)
+        } else {
+            fmt.Printf("%12s %25s %25s %15s %12s %12s %10s\n", "Id", "Name", "Group", "Ip", "Type", "Role", "Status")
+            for _,v := range peers {
+                status := "alive"
+                if v.Status == 0 {
+                    status = "dead"
+                }
+                fmt.Printf("%12s %25s %25s %15s %12s %12s %10s\n", v.Id, v.Name, v.Group, v.Ip, roleName(v.Role), raftRoleName(v.RaftRole), status)
             }
-            fmt.Printf("%12s %25s %25s %15s %12s %12s %10s\n", v.Id, v.Name, v.Group, v.Ip, roleName(v.Role), raftRoleName(v.RaftRole), status)
         }
     }
 }
@@ -70,17 +74,22 @@ func cmd_addnode () {
             }
         }
         if len(params) > 0 {
-            r := ghttp.Post(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API), gjson.Encode(params))
-            if r == nil {
-                fmt.Println("ERROR: connect to local dister api failed")
+            b, _ := gjson.Encode(params)
+            r, e := ghttp.Request("post", fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API), b)
+            if e != nil {
+                glog.Error("ERROR: connect to local dister api failed,", e.Error())
                 return
             }
             defer r.Close()
-            content := r.ReadAll()
-            data    := gjson.DecodeToJson(content)
-            if data.GetInt("result") != 1 {
-                fmt.Println(data.GetString("message"))
+            data, err := gjson.DecodeToJson(r.ReadAll())
+            if err != nil {
+                glog.Error(err)
                 return
+            } else {
+                if data.GetInt("result") != 1 {
+                    fmt.Println(data.GetString("message"))
+                    return
+                }
             }
         }
     }
@@ -100,17 +109,22 @@ func cmd_delnode () {
             }
         }
         if len(params) > 0 {
-            r := ghttp.Delete(fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API), gjson.Encode(params))
-            if r == nil {
-                fmt.Println("ERROR: connect to local dister api failed")
+            b, _ := gjson.Encode(params)
+            r, e := ghttp.Request("delete", fmt.Sprintf("http://127.0.0.1:%d/node", gPORT_API), b)
+            if e != nil {
+                glog.Error("ERROR: connect to local dister api failed,", e.Error())
                 return
             }
             defer r.Close()
-            content := r.ReadAll()
-            data    := gjson.DecodeToJson(content)
-            if data.GetInt("result") != 1 {
-                fmt.Println(data.GetString("message"))
+            data, err := gjson.DecodeToJson(r.ReadAll())
+            if err != nil {
+                glog.Error(err)
                 return
+            } else {
+                if data.GetInt("result") != 1 {
+                    fmt.Println(data.GetString("message"))
+                    return
+                }
             }
         }
     }
@@ -120,16 +134,19 @@ func cmd_delnode () {
 // 查看所有kv
 // 使用方式：dister kvs
 func cmd_kvs () {
-    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API))
-    if r == nil {
-        fmt.Println("ERROR: connect to local dister api failed")
+    r, e := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API))
+    if e != nil {
+        glog.Error("ERROR: connect to local dister api failed,", e.Error())
         return
     }
     defer r.Close()
-    content := r.ReadAll()
-    data    := gjson.DecodeToJson(content)
+    data, err := gjson.DecodeToJson(r.ReadAll())
+    if err != nil {
+        glog.Error(err)
+        return
+    }
     if data.GetInt("result") != 1 {
-        fmt.Println("ERROR: " + data.GetString("message"))
+        glog.Error("ERROR: " + data.GetString("message"))
         return
     }
     m := data.GetMap("data")
@@ -157,18 +174,22 @@ func cmd_kvs () {
 // 查询kv
 // 使用方式：dister getkv 键名
 func cmd_getkv () {
-    k := gconsole.Value.Get(2)
-    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/kv?k=%s", gPORT_API, k))
-    if r == nil {
-        fmt.Println("ERROR: connect to local dister api failed")
+    k    := gconsole.Value.Get(2)
+    r, e := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/kv?k=%s", gPORT_API, k))
+    if e != nil {
+        glog.Error("ERROR: connect to local dister api failed,", e.Error())
         return
     }
     defer r.Close()
-    content := r.ReadAll()
-    data    := gjson.DecodeToJson(content)
-    if data.GetInt("result") != 1 {
-        fmt.Println("ERROR: " + data.GetString("message"))
+    data, err := gjson.DecodeToJson(r.ReadAll())
+    if err != nil {
+        glog.Error(err)
         return
+    } else {
+        if data.GetInt("result") != 1 {
+            fmt.Println(data.GetString("message"))
+            return
+        }
     }
     fmt.Println(data.GetString("data"))
 }
@@ -179,18 +200,22 @@ func cmd_addkv () {
     k := gconsole.Value.Get(2)
     v := gconsole.Value.Get(3)
     if k != "" && v != ""{
-        m := map[string]string{k: v}
-        r := ghttp.Post(fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API), gjson.Encode(m))
-        if r == nil {
-            fmt.Println("ERROR: connect to local dister api failed")
+        b, _ := gjson.Encode(map[string]string{k: v})
+        r, e := ghttp.Request("post", fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API), b)
+        if e != nil {
+            glog.Error("ERROR: connect to local dister api failed,", e.Error())
             return
         }
         defer r.Close()
-        content := r.ReadAll()
-        data    := gjson.DecodeToJson(content)
-        if data.GetInt("result") != 1 {
-            fmt.Println("ERROR: " + data.GetString("message"))
+        data, err := gjson.DecodeToJson(r.ReadAll())
+        if err != nil {
+            glog.Error(err)
             return
+        } else {
+            if data.GetInt("result") != 1 {
+                fmt.Println(data.GetString("message"))
+                return
+            }
         }
     }
     fmt.Println("ok")
@@ -209,17 +234,22 @@ func cmd_delkv () {
             }
         }
         if len(params) > 0 {
-            r := ghttp.Delete(fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API), gjson.Encode(params))
-            if r == nil {
-                fmt.Println("ERROR: connect to local dister api failed")
+            b, _ := gjson.Encode(params)
+            r, e := ghttp.Request("delete", fmt.Sprintf("http://127.0.0.1:%d/kv", gPORT_API), b)
+            if e != nil {
+                glog.Error("ERROR: connect to local dister api failed,", e.Error())
                 return
             }
             defer r.Close()
-            content := r.ReadAll()
-            data    := gjson.DecodeToJson(content)
-            if data.GetInt("result") != 1 {
-                fmt.Println("ERROR: " + data.GetString("message"))
+            data, err := gjson.DecodeToJson(r.ReadAll())
+            if err != nil {
+                glog.Error(err)
                 return
+            } else {
+                if data.GetInt("result") != 1 {
+                    fmt.Println(data.GetString("message"))
+                    return
+                }
             }
         }
     }
@@ -229,17 +259,21 @@ func cmd_delkv () {
 // 查看所有Service
 // 使用方式：dister services
 func cmd_services () {
-    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API))
-    if r == nil {
-        fmt.Println("ERROR: connect to local dister api failed")
+    r, e := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API))
+    if e != nil {
+        glog.Error("ERROR: connect to local dister api failed,", e.Error())
         return
     }
     defer r.Close()
-    content := r.ReadAll()
-    data    := gjson.DecodeToJson(content)
-    if data.GetInt("result") != 1 {
-        fmt.Println("ERROR: " + data.GetString("message"))
+    data, err := gjson.DecodeToJson(r.ReadAll())
+    if err != nil {
+        glog.Error(err)
         return
+    } else {
+        if data.GetInt("result") != 1 {
+            fmt.Println(data.GetString("message"))
+            return
+        }
     }
     services := data.GetMap("data")
     if services != nil {
@@ -252,17 +286,21 @@ func cmd_services () {
 // 使用方式：dister getservice Service名称
 func cmd_getservice () {
     name := gconsole.Value.Get(2)
-    r    := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/service?name=%s", gPORT_API, name))
-    if r == nil {
-        fmt.Println("ERROR: connect to local dister api failed")
+    r, e := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/service?name=%s", gPORT_API, name))
+    if e != nil {
+        glog.Error("ERROR: connect to local dister api failed,", e.Error())
         return
     }
     defer r.Close()
-    content := r.ReadAll()
-    data    := gjson.DecodeToJson(content)
-    if data.GetInt("result") != 1 {
-        fmt.Println("ERROR: " + data.GetString("message"))
+    data, err := gjson.DecodeToJson(r.ReadAll())
+    if err != nil {
+        glog.Error(err)
         return
+    } else {
+        if data.GetInt("result") != 1 {
+            fmt.Println(data.GetString("message"))
+            return
+        }
     }
     service := data.GetMap("data")
     if service != nil {
@@ -283,17 +321,21 @@ func cmd_addservice () {
         fmt.Println("service config file does not exist")
         return
     }
-    r := ghttp.Post(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API), gfile.GetContents(path))
-    if r == nil {
-        fmt.Println("ERROR: connect to local dister api failed")
+    r, e := ghttp.Post(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API), gfile.GetContents(path))
+    if e != nil {
+        glog.Error("ERROR: connect to local dister api failed,", e.Error())
         return
     }
     defer r.Close()
-    content := r.ReadAll()
-    data    := gjson.DecodeToJson(content)
-    if data.GetInt("result") != 1 {
-        fmt.Println("ERROR: " + data.GetString("message"))
+    data, err := gjson.DecodeToJson(r.ReadAll())
+    if err != nil {
+        glog.Error(err)
         return
+    } else {
+        if data.GetInt("result") != 1 {
+            fmt.Println(data.GetString("message"))
+            return
+        }
     }
     fmt.Println("ok")
 }
@@ -311,17 +353,22 @@ func cmd_delservice () {
             }
         }
         if len(params) > 0 {
-            r := ghttp.Delete(fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API), gjson.Encode(params))
-            if r == nil {
-                fmt.Println("ERROR: connect to local dister api failed")
+            b, _ := gjson.Encode(params)
+            r, e := ghttp.Request("delete", fmt.Sprintf("http://127.0.0.1:%d/service", gPORT_API), b)
+            if e != nil {
+                glog.Error("ERROR: connect to local dister api failed,", e.Error())
                 return
             }
             defer r.Close()
-            content := r.ReadAll()
-            data    := gjson.DecodeToJson(content)
-            if data.GetInt("result") != 1 {
-                fmt.Println("ERROR: " + data.GetString("message"))
+            data, err := gjson.DecodeToJson(r.ReadAll())
+            if err != nil {
+                glog.Error(err)
                 return
+            } else {
+                if data.GetInt("result") != 1 {
+                    fmt.Println(data.GetString("message"))
+                    return
+                }
             }
         }
     }
@@ -333,17 +380,21 @@ func cmd_delservice () {
 // 使用方式：dister balance Service名称
 func cmd_balance () {
     name := gconsole.Value.Get(2)
-    r := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/balance?name=%s", gPORT_API, name))
-    if r == nil {
-        fmt.Println("ERROR: connect to local dister api failed")
+    r, e := ghttp.Get(fmt.Sprintf("http://127.0.0.1:%d/balance?name=%s", gPORT_API, name))
+    if e != nil {
+        glog.Error("ERROR: connect to local dister api failed,", e.Error())
         return
     }
     defer r.Close()
-    content := r.ReadAll()
-    data    := gjson.DecodeToJson(content)
-    if data.GetInt("result") != 1 {
-        fmt.Println("ERROR: " + data.GetString("message"))
+    data, err := gjson.DecodeToJson(r.ReadAll())
+    if err != nil {
+        glog.Error(err)
         return
+    } else {
+        if data.GetInt("result") != 1 {
+            fmt.Println(data.GetString("message"))
+            return
+        }
     }
     service := data.GetMap("data")
     if service != nil {

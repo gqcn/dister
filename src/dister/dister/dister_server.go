@@ -11,7 +11,7 @@ import (
     "strconv"
     "gitee.com/johng/gf/g/os/gfile"
     "gitee.com/johng/gf/g/os/glog"
-    "gitee.com/johng/gf/g/net/gip"
+    "gitee.com/johng/gf/g/net/gipv4"
     "gitee.com/johng/gf/g/net/gtcp"
     "gitee.com/johng/gf/g/net/ghttp"
     "gitee.com/johng/gf/g/util/grand"
@@ -44,7 +44,7 @@ func (n *Node) doRecieveMsg(conn net.Conn) *Msg {
     if data != nil && len(data) > 0 {
         msg := n.decodeMsg(data)
         if msg.Info.Ip == "127.0.0.1" || msg.Info.Ip == "" {
-            ip, _      := gip.ParseAddress(conn.RemoteAddr().String())
+            ip, _      := gipv4.ParseAddress(conn.RemoteAddr().String())
             msg.Info.Ip = ip
         }
         // 保存节点信息
@@ -58,7 +58,7 @@ func (n *Node) doRecieveMsg(conn net.Conn) *Msg {
 
 // 发送Msg
 func (n *Node) sendMsg(conn net.Conn, head int, body string) error {
-    ip, _  := gip.ParseAddress(conn.LocalAddr().String())
+    ip, _  := gipv4.ParseAddress(conn.LocalAddr().String())
     info   := n.getNodeInfo()
     info.Ip = ip
     s, _ := n.encodeMsg(head, body, info)
@@ -76,7 +76,7 @@ func (n *Node) encodeMsg(head int, body string, info *NodeInfo) ([]byte, error) 
     nameBytes  := []byte(info.Name)
     groupBytes := []byte(info.Group)
     id, _      := strconv.ParseUint(info.Id, 16, 32)
-    iplong     := gip.Ip2long(info.Ip)
+    iplong     := gipv4.Ip2long(info.Ip)
     b2, err    := gbinary.Encode(
         int32(len(nameBytes)),  nameBytes,
         int32(len(groupBytes)), groupBytes,
@@ -114,7 +114,7 @@ func (n *Node) decodeMsg(b []byte) *Msg {
             Name             : string(nameBytes),
             Group            : string(groupBytes),
             Id               : strings.ToUpper(fmt.Sprintf("%x", id)),
-            Ip               : gip.Long2ip(iplong),
+            Ip               : gipv4.Long2ip(iplong),
             Status           : gSTATUS_ALIVE,
             Role             : role,
             RaftRole         : raft,
@@ -201,7 +201,8 @@ func (n *Node) Run() {
     go gtcp.NewServer(fmt.Sprintf(":%d", gPORT_REPL),  n.replTcpHandler).Run()
     go func() {
         // API只能本地访问
-        api := ghttp.NewServerByAddr(fmt.Sprintf("127.0.0.1:%d", gPORT_API))
+        api := ghttp.GetServer("localapi")
+        api.SetAddr(fmt.Sprintf("127.0.0.1:%d", gPORT_API))
         api.BindController("/kv",      &NodeApiKv{node: n})
         api.BindController("/node",    &NodeApiNode{node: n})
         api.BindController("/service", &NodeApiService{node: n})
@@ -489,13 +490,13 @@ func (n *Node) sayHi(ip string) bool {
 
 // 向局域网内其他主机通知上线
 func (n *Node) sayHiToLocalLan() {
-    ips, err := gip.IntranetIP()
+    ips, err := gipv4.IntranetIP()
     if err != nil {
         glog.Error(err)
         return
     }
     for _, v := range ips {
-        segment := gip.GetSegment(v)
+        segment := gipv4.GetSegment(v)
         for i := 1; i < 256; i++ {
             go func(ip string) {
                 if n.sayHi(ip) {
@@ -551,8 +552,8 @@ func (n *Node) compareLeaderWithRemoteNodeByDetail(logid int64, count int32, sco
 
 // 检查链接是否属于本地的一个链接(即：自己链接自己)
 func (n *Node) checkConnInLocalNode(conn net.Conn) bool {
-    localip,  _ := gip.ParseAddress(conn.LocalAddr().String())
-    remoteip, _ := gip.ParseAddress(conn.RemoteAddr().String())
+    localip,  _ := gipv4.ParseAddress(conn.LocalAddr().String())
+    remoteip, _ := gipv4.ParseAddress(conn.RemoteAddr().String())
     return localip == remoteip
 }
 
