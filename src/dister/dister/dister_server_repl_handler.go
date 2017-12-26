@@ -56,12 +56,14 @@ func (n *Node) replTcpHandler(conn net.Conn) {
 
 // 用于API接口的Service查询
 func (n *Node) onMsgApiServiceGet(conn net.Conn, msg *Msg) {
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, n.getServiceByApi(msg.Body))
+    b, _ := n.getServiceByApi(string(msg.Body))
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, b)
 }
 
 // 用于API接口的数据查询
 func (n *Node) onMsgApiDataGet(conn net.Conn, msg *Msg) {
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, n.getDataByApi(msg.Body))
+    b, _ := n.getDataByApi(string(msg.Body))
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, b)
 }
 
 // kv设置，这里增加了一把数据锁，以保证请求的先进先出队列执行，因此写效率会有所降低
@@ -69,7 +71,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     result := gMSG_REPL_RESPONSE
     if n.getRaftRole() == gROLE_RAFT_LEADER {
         n.dmutex.Lock()
-        items := gjson.Decode(msg.Body)
+        items, _ := gjson.Decode(msg.Body)
         // 由于锁机制在请求量大的情况下会造成请求排队阻塞，因此这里面还需要再判断一下当前节点角色，防止在阻塞过程中角色的转变
         if n.getRaftRole() == gROLE_RAFT_LEADER && items != nil {
             var entry = LogEntry {
@@ -127,18 +129,18 @@ func (n *Node) sendAppendLogEntryToPeers(entry *LogEntry) bool {
 
     var doneCount int32 = 0 // 成功的请求数
     var failCount int32 = 0 // 失败的请求数
-    result   := true
-    entrystr := gjson.Encode(*entry)
+    result    := true
+    entryb, _ := gjson.Encode(*entry)
     for _, v := range list {
         info := v
-        go func(info *NodeInfo, entrystr string) {
-            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_DATA_APPENDENTRY, entrystr)
+        go func(info *NodeInfo, entryb []byte) {
+            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_DATA_APPENDENTRY, entryb)
             if err == nil && (msg != nil && msg.Head == gMSG_REPL_RESPONSE) {
                 atomic.AddInt32(&doneCount, 1)
             } else {
                 atomic.AddInt32(&failCount, 1)
             }
-        }(&info, entrystr)
+        }(&info, entryb)
     }
     // 等待执行结束，超时时间60秒
     timeout := gtime.Second() + 60
@@ -182,7 +184,7 @@ func (n *Node) getAliveServerNodes() []NodeInfo {
 // Follower->Leader的配置同步
 func (n *Node) onMsgReplConfigFromFollower(conn net.Conn, msg *Msg) {
     //glog.Println("config replication from", msg.Info.Name)
-    j := gjson.DecodeToJson(msg.Body)
+    j, _ := gjson.DecodeToJson(msg.Body)
     if j != nil {
         // 初始化节点列表，包含自定义的所需添加的服务器IP或者域名列表
         peers := j.GetArray("Peers")
@@ -282,7 +284,8 @@ func (n *Node) saveLogEntry(entry *LogEntry) {
 
 // 保存LogEntry到日志文件中
 func (n *Node) saveLogEntryToFile(entry *LogEntry) {
-    c := fmt.Sprintf("%d,%d,%s\n", entry.Id, entry.Act, gjson.Encode(entry.Items))
+    b, _ := gjson.Encode(entry.Items)
+    c := fmt.Sprintf("%d,%d,%s\n", entry.Id, entry.Act, b)
     p := n.getLogEntryFileSavePathById(entry.Id)
     gfile.PutBinContentsAppend(p, []byte(c))
 }
@@ -352,7 +355,8 @@ func (n *Node) updateDataToRemoteNode(conn net.Conn, info *NodeInfo) {
             length := len(list)
             if length > 0 {
                 glog.Debugfln("data incremental replication from %s to %s, start logid: %d, end logid: %d, size: %d", n.getName(), info.Name, list[0].Id, list[length-1].Id, length)
-                if err := n.sendMsg(conn, gMSG_REPL_DATA_REPLICATION, gjson.Encode(list)); err != nil {
+                b, _ := gjson.Encode(list)
+                if err := n.sendMsg(conn, gMSG_REPL_DATA_REPLICATION, b); err != nil {
                     glog.Error(err)
                     time.Sleep(time.Second)
                     return
@@ -401,7 +405,8 @@ func (n *Node) checkAndFixNodeData(info *NodeInfo) {
                 ids[k] = v.Id
             }
             glog.Debugfln("sending check logids: %v", ids)
-            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_VALID_LOGID_CHECK_FIX, gjson.Encode(ids))
+            b, _     := gjson.Encode(ids)
+            msg, err := n.sendAndReceiveMsgToNode(info, gPORT_REPL, gMSG_REPL_VALID_LOGID_CHECK_FIX, b)
             if err == nil && msg.Head == gMSG_REPL_RESPONSE {
                 if msg.Body != "-1" {
                     return
