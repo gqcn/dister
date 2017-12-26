@@ -57,18 +57,17 @@ func (n *Node) doRecieveMsg(conn net.Conn) *Msg {
 }
 
 // 发送Msg
-func (n *Node) sendMsg(conn net.Conn, head int, body string) error {
+func (n *Node) sendMsg(conn net.Conn, head int, body []byte) error {
     ip, _  := gipv4.ParseAddress(conn.LocalAddr().String())
     info   := n.getNodeInfo()
     info.Ip = ip
-    s, _ := n.encodeMsg(head, body, info)
+    s, _   := n.encodeMsg(head, body, info)
     return Send(conn, s)
 }
 
 // 对Msg进行二进制打包
-func (n *Node) encodeMsg(head int, body string, info *NodeInfo) ([]byte, error) {
-    c       := []byte(body)
-    b1, err := gbinary.Encode(int32(head), int32(len(c)), c)
+func (n *Node) encodeMsg(head int, body []byte, info *NodeInfo) ([]byte, error) {
+    b1, err := gbinary.Encode(int32(head), int32(len(body)), body)
     if err != nil {
         glog.Error(err)
         return nil, err
@@ -78,10 +77,16 @@ func (n *Node) encodeMsg(head int, body string, info *NodeInfo) ([]byte, error) 
     id, _      := strconv.ParseUint(info.Id, 16, 32)
     iplong     := gipv4.Ip2long(info.Ip)
     b2, err    := gbinary.Encode(
-        int32(len(nameBytes)),  nameBytes,
-        int32(len(groupBytes)), groupBytes,
-        uint32(id), iplong, info.Role, info.RaftRole,
-        info.LastLogId, info.LastServiceLogId,
+        int32(len(nameBytes)),
+        nameBytes,
+        int32(len(groupBytes)),
+        groupBytes,
+        uint32(id),
+        iplong,
+        info.Role,
+        info.RaftRole,
+        info.LastLogId,
+        info.LastServiceLogId,
         []byte(info.Version),
     )
     if err != nil {
@@ -109,7 +114,7 @@ func (n *Node) decodeMsg(b []byte) *Msg {
     version       := b[8 + bodySize + 4 + nameSize + 4 + groupSize + 32:]
     return &Msg {
         Head: int(head),
-        Body: string(bodyBytes),
+        Body: bodyBytes,
         Info: NodeInfo{
             Name             : string(nameBytes),
             Group            : string(groupBytes),
@@ -125,8 +130,8 @@ func (n *Node) decodeMsg(b []byte) *Msg {
     }
 }
 
-// 向指定节点发送并接收消息
-func (n *Node) sendAndReceiveMsgToNode(info *NodeInfo, port int, head int, body string) (*Msg, error) {
+// 向指定节点发送并接收消息(阻塞执行)
+func (n *Node) sendAndReceiveMsgToNode(info *NodeInfo, port int, head int, body []byte) (*Msg, error) {
     conn := n.getConn(info.Ip, port)
     if conn != nil {
         defer conn.Close()
@@ -151,9 +156,9 @@ func (n *Node) sendAndReceiveMsgToNode(info *NodeInfo, port int, head int, body 
     return nil, errors.New("error")
 }
 
-// 获得TCP链接
+// 获得TCP链接，有超时时间限制
 func (n *Node) getConn(ip string, port int) net.Conn {
-    conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, port), 3 * time.Second)
+    conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, port), gTCP_CONN_TIMEOUT * time.Millisecond)
     if err == nil {
         return conn
     }
@@ -162,7 +167,7 @@ func (n *Node) getConn(ip string, port int) net.Conn {
 
 // 运行节点
 func (n *Node) Run() {
-    // 命令行操作
+    // 判断是否为命令行操作
     if gconsole.Value.Get(1) != "" {
         gconsole.AutoRun()
         os.Exit(0)
@@ -203,10 +208,10 @@ func (n *Node) Run() {
         // API只能本地访问
         api := ghttp.GetServer("localapi")
         api.SetAddr(fmt.Sprintf("127.0.0.1:%d", gPORT_API))
-        api.BindController("/kv",      &NodeApiKv{node: n})
-        api.BindController("/node",    &NodeApiNode{node: n})
-        api.BindController("/service", &NodeApiService{node: n})
-        api.BindController("/balance", &NodeApiBalance{node: n})
+        api.BindObjectRest("/kv",      &NodeApiKv{node: n})
+        api.BindObjectRest("/node",    &NodeApiNode{node: n})
+        api.BindObjectRest("/service", &NodeApiService{node: n})
+        api.BindObjectRest("/balance", &NodeApiBalance{node: n})
         api.Run()
     }()
 
@@ -303,9 +308,9 @@ func (n *Node) initFromCfg() {
     }
     n.CfgFilePath = cfgpath
 
-    j := gjson.DecodeToJson(string(gfile.GetContents(cfgpath)))
-    if j == nil {
-        glog.Fatalln("config file decoding failed(surely a json format?), exit")
+    j, e := gjson.DecodeToJson(gfile.GetBinContents(cfgpath))
+    if e != nil {
+        glog.Fatalln("config file decoding failed:", e.Error())
     }
     //glog.Println("initializing from", cfgpath)
     // 节点名称
@@ -404,7 +409,7 @@ func (n *Node) replicateConfigToLeader() {
             if n.getLeader() != nil {
                 if gfile.Exists(n.CfgFilePath) {
                     //glog.Println("replicate config to leader")
-                    _, err := n.SendToLeader(gMSG_REPL_CONFIG_FROM_FOLLOWER, gPORT_REPL, gfile.GetContents(n.CfgFilePath))
+                    _, err := n.SendToLeader(gMSG_REPL_CONFIG_FROM_FOLLOWER, gPORT_REPL, gfile.GetBinContents(n.CfgFilePath))
                     if err == nil {
                         n.CfgReplicated = true
                         //glog.Println("replicate config to leader, done")
@@ -439,28 +444,27 @@ func (n *Node) getNodeInfo() *NodeInfo {
 }
 
 // 向leader发送操作请求，并返回执行结果
-func (n *Node) SendToLeader(head int, port int, body string) (string, error) {
+func (n *Node) SendToLeader(head int, port int, body []byte) ([]byte, error) {
     leader := n.getLeader()
     if leader == nil {
-        return "", errors.New(fmt.Sprintf("leader not found, please try again after leader election done, request head: %d", head))
+        return nil, errors.New(fmt.Sprintf("leader not found, please try again after leader election done, request head: %d", head))
     }
     conn := n.getConn(leader.Ip, port)
     if conn == nil {
-        return "", errors.New("could not connect to leader: " + leader.Ip)
+        return nil, errors.New("could not connect to leader: " + leader.Ip)
     }
     defer conn.Close()
-    err := n.sendMsg(conn, head, body)
-    if err != nil {
-        return "", errors.New("sending request error: " + err.Error())
+    if err := n.sendMsg(conn, head, body); err != nil {
+        return nil, errors.New("sending request error: " + err.Error())
     } else {
         msg := n.receiveMsg(conn)
         if msg != nil && ((port == gPORT_RAFT && msg.Head != gMSG_RAFT_RESPONSE) || (port == gPORT_REPL && msg.Head != gMSG_REPL_RESPONSE)) {
-            return "", errors.New(fmt.Sprintf("handling request error, response code: %d", msg.Head))
+            return nil, errors.New(fmt.Sprintf("handling request error, response code: %d", msg.Head))
         } else {
             return msg.Body, nil
         }
     }
-    return "", errors.New("unknown error")
+    return nil, errors.New("unknown error")
 }
 
 // 通过IP向一个节点发送消息并建立双方联系
@@ -479,7 +483,7 @@ func (n *Node) sayHi(ip string) bool {
         n.Peers.Remove(ip)
         return false
     }
-    err := n.sendMsg(conn, gMSG_RAFT_HI, "")
+    err := n.sendMsg(conn, gMSG_RAFT_HI, nil)
     if err != nil {
         return false
     } else {
@@ -507,7 +511,7 @@ func (n *Node) sayHiToLocalLan() {
     }
 }
 
-// 与远程节点对比谁可以成为leader，返回true表示自己，false表示对方节点
+// 当前节点与远程节点对比谁可以成为leader，返回true表示自己，false表示对方节点
 // 需要同时对比日志信息及选举比分
 func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
     // 优先比较数据新旧程度
@@ -517,12 +521,12 @@ func (n *Node) compareLeaderWithRemoteNode(info *NodeInfo) bool {
         return false
     }
     // 如果数据一致，那么比较选举比分
-    result      := true
-    compareData := gjson.Encode(map[string]interface{}{
+    result    := true
+    data, err := gjson.Encode(map[string]interface{}{
         "score": n.getScore(),
         "count": n.getScoreCount(),
     })
-    msg, err := n.sendAndReceiveMsgToNode(info, gPORT_RAFT, gMSG_RAFT_LEADER_COMPARE_REQUEST, compareData)
+    msg, err := n.sendAndReceiveMsgToNode(info, gPORT_RAFT, gMSG_RAFT_LEADER_COMPARE_REQUEST, data)
     if err != nil || (msg != nil && msg.Head == gMSG_RAFT_LEADER_COMPARE_FAILURE) {
         result = false
     }

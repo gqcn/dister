@@ -17,24 +17,24 @@ type PriorityNode struct {
 }
 
 // 负载均衡查询
-func (this *NodeApiBalance) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiBalance) Get(s *ghttp.Server, r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     name := r.GetRequestString("name")
     if name == "" {
-        w.ResponseJson(0, "incomplete input: name is required", nil)
+        w.WriteJson(0, "incomplete input: name is required", nil)
     } else {
         key    := fmt.Sprintf("dister_service_balance_name_%s_%v", name, this.node.getLastServiceLogId())
         result := gcache.Get(key)
         if result == nil {
             r, err := this.getAliveServiceByPriority(name)
             if err != nil {
-                w.ResponseJson(0, err.Error(), nil)
+                w.WriteJson(0, err.Error(), nil)
                 return
             } else {
                 result = r
                 gcache.Set(key, result, 1000)
             }
         }
-        w.ResponseJson(1, "ok", result)
+        w.WriteJson(1, "ok", result.([]byte))
     }
 }
 
@@ -49,8 +49,7 @@ func (this *NodeApiBalance) getServiceFromLeaderByName(name string) (interface{}
     if result != nil {
         return result, nil
     } else {
-        r, err := this.node.SendToLeader(gMSG_API_SERVICE_GET, gPORT_REPL, name)
-        if err != nil {
+        if r, err := this.node.SendToLeader(gMSG_API_SERVICE_GET, gPORT_REPL, []byte(name)); err != nil {
             return nil, err
         } else {
             var res ghttp.ResponseJson
@@ -59,8 +58,10 @@ func (this *NodeApiBalance) getServiceFromLeaderByName(name string) (interface{}
                 return nil, err
             } else {
                 // 转换数据结构，这里即使res.Data是空，也必须存一个空的对象进去，以便缓存
-                var sc ServiceConfig
-                gjson.DecodeTo(gjson.Encode(res.Data), &sc)
+                sc := ServiceConfig{}
+                if err := gjson.DecodeTo(res.Data, &sc); err != nil {
+                    return nil, err
+                }
                 gcache.Set(key, sc, 3600000)
                 return sc, nil
             }
@@ -68,7 +69,7 @@ func (this *NodeApiBalance) getServiceFromLeaderByName(name string) (interface{}
     }
 }
 
-// 查询存货的service, 并根据priority计算负载均衡，取出一条返回
+// 查询存活的service, 并根据priority计算负载均衡，取出一条返回
 func (this *NodeApiBalance) getAliveServiceByPriority(name string) (interface{}, error) {
     var s ServiceConfig
     if this.node.getRole() != gROLE_SERVER {

@@ -49,7 +49,8 @@ func (n *Node) replTcpHandler(conn net.Conn) {
         case gMSG_API_SERVICE_SET:                  n.onMsgApiServiceSet(conn, msg)
         case gMSG_API_SERVICE_REMOVE:               n.onMsgApiServiceRemove(conn, msg)
     }
-    //这里不用自动关闭链接，由于链接有读取超时，当一段时间没有数据时会自动关闭
+    // 链接不再使用时务必在客户端进行关闭，防止链接数超过系统限制
+    // 此外由于链接有读取超时，当一段时间没有数据时也会自动关闭，但是在并发量大时，未手动关闭链接同样有链接数限制问题
     n.replTcpHandler(conn)
 }
 
@@ -92,7 +93,7 @@ func (n *Node) onMsgReplDataSet(conn net.Conn, msg *Msg) {
     if result == gMSG_REPL_FAILED {
         glog.Debugfln("data set failed, msg: %s", msg.Body)
     }
-    n.sendMsg(conn, result, "")
+    n.sendMsg(conn, result, nil)
 }
 
 // 当Leader获取数据写入时，直接写入数据请求
@@ -111,7 +112,7 @@ func (n *Node) onMsgReplDataAppendEntry(conn net.Conn, msg *Msg) {
     } else {
         result = gMSG_REPL_FAILED
     }
-    n.sendMsg(conn, result, "")
+    n.sendMsg(conn, result, nil)
 }
 
 // 发送数据操作到其他节点，保证有另外一个server节点成功，那么该请求便成功
@@ -240,7 +241,7 @@ func (n *Node) onMsgApiServiceRemove(conn net.Conn, msg *Msg) {
             n.setLastServiceLogId(gtime.Millisecond())
         }
     }
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, nil)
 }
 
 // Service设置
@@ -255,7 +256,7 @@ func (n *Node) onMsgApiServiceSet(conn net.Conn, msg *Msg) {
             n.setLastServiceLogId(gtime.Millisecond())
         }
     }
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, nil)
 }
 
 // kv删除
@@ -304,7 +305,7 @@ func (n *Node) saveLogEntryToVar(entry *LogEntry) {
 // 数据同步，更新本地数据
 func (n *Node) onMsgReplDataReplication(conn net.Conn, msg *Msg) {
     n.updateDataFromRemoteNode(conn, msg)
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, nil)
 }
 
 // 从目标节点同步数据，采用增量模式
@@ -544,7 +545,7 @@ func (n *Node) onMsgApiPeersAdd(conn net.Conn, msg *Msg) {
             n.updatePeerInfo(NodeInfo{Id: ip, Ip: ip})
         }
     }
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, nil)
 }
 
 // 删除节点，目前通过IP删除，效率较低
@@ -564,6 +565,6 @@ func (n *Node) onMsgApiPeersRemove(conn net.Conn, msg *Msg) {
             }
         }
     }
-    n.sendMsg(conn, gMSG_REPL_RESPONSE, "")
+    n.sendMsg(conn, gMSG_REPL_RESPONSE, nil)
 }
 

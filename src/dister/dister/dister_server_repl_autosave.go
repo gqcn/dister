@@ -48,12 +48,14 @@ func (n *Node) saveDataToFile() {
         "LastLogId"   : n.getLastLogId(),
         "DataMap"     : *n.DataMap.Clone(),
     }
-    content := []byte(gjson.Encode(&data))
+    content, err := gjson.Encode(data)
+    if err != nil {
+        return
+    }
     if gCOMPRESS_SAVING {
         content = gcompress.Zlib(content)
     }
-    err := gfile.PutBinContents(n.getDataFilePath(), content)
-    if err != nil {
+    if err := gfile.PutBinContents(n.getDataFilePath(), content); err != nil {
         glog.Error("saving data error:", err)
     }
 }
@@ -72,12 +74,14 @@ func (n *Node) saveServiceToFile() {
         "LastServiceLogId"  : n.getLastServiceLogId(),
         "Service"           : *n.Service.Clone(),
     }
-    content := []byte(gjson.Encode(&data))
+    content, err := gjson.Encode(data)
+    if err != nil {
+        return
+    }
     if gCOMPRESS_SAVING {
         content = gcompress.Zlib(content)
     }
-    err := gfile.PutBinContents(n.getServiceFilePath(), content)
-    if err != nil {
+    if err := gfile.PutBinContents(n.getServiceFilePath(), content); err != nil {
         glog.Error("saving service error:", err)
     }
 }
@@ -115,8 +119,11 @@ func (n *Node) restoreDataMap() {
         }
         if bin != nil && len(bin) > 0 {
             //glog.Println("restore data from", path)
+            j, err := gjson.DecodeToJson(bin)
+            if err != nil {
+                glog.Fatal(err)
+            }
             m  := make(map[string]string)
-            j  := gjson.DecodeToJson(string(bin))
             id := j.GetInt64("LastLogId")
             if err := j.GetToVar("DataMap", &m); err == nil {
                 n.DataMap.BatchSet(m)
@@ -149,8 +156,11 @@ func (n *Node) restoreService() {
         }
         if bin != nil && len(bin) > 0 {
             //glog.Println("restore service from", path)
+            j, err := gjson.DecodeToJson(bin)
+            if err != nil {
+                glog.Fatal(err)
+            }
             m := make(map[string]Service)
-            j := gjson.DecodeToJson(string(bin))
             n.setLastServiceLogId(j.GetInt64("LastServiceLogId"))
             if err := j.GetToVar("Service", &m); err == nil {
                 for k, v := range m {

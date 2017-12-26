@@ -9,43 +9,52 @@ import (
 )
 
 // 查询Peers
-func (this *NodeApiNode) Get(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    w.ResponseJson(1, "ok", *this.node.getAllPeers())
+func (this *NodeApiNode) Get(s *ghttp.Server, r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+    if b, err := gjson.Encode(*this.node.getAllPeers()); err != nil {
+        w.WriteJson(0, err.Error(), nil)
+    } else {
+        w.WriteJson(1, "ok", b)
+    }
 }
 
-// 新增Peer
-func (this *NodeApiNode) Put(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
-    this.Post(r, w)
-}
-
-// 修改Peer
-func (this *NodeApiNode) Post(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+// 新增/修改Peer
+func (this *NodeApiNode) Post(s *ghttp.Server, r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {
-        w.ResponseJson(0, "invalid data type: " + err.Error(), nil)
+        w.WriteJson(0, "invalid data type: " + err.Error(), nil)
         return
     }
-    _, err  = this.node.SendToLeader(gMSG_API_PEERS_ADD, gPORT_REPL, gjson.Encode(list))
+    b, err := gjson.Encode(list)
     if err != nil {
-        w.ResponseJson(0, err.Error(), nil)
+        w.WriteJson(0, err.Error(), nil)
+        return
+    }
+    _, err  = this.node.SendToLeader(gMSG_API_PEERS_ADD, gPORT_REPL, b)
+    if err != nil {
+        w.WriteJson(0, err.Error(), nil)
     } else {
-        w.ResponseJson(1, "ok", nil)
+        w.WriteJson(1, "ok", nil)
     }
 }
 
 // 删除Peer
-func (this *NodeApiNode) Delete(r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
+func (this *NodeApiNode) Delete(s *ghttp.Server, r *ghttp.ClientRequest, w *ghttp.ServerResponse) {
     list := make([]string, 0)
     err  := gjson.DecodeTo(r.GetRaw(), &list)
     if err != nil {
-        w.ResponseJson(0, "invalid data type: " + err.Error(), nil)
+        w.WriteJson(0, "invalid data type: " + err.Error(), nil)
         return
     }
-    _, err  = this.node.SendToLeader(gMSG_API_PEERS_REMOVE, gPORT_REPL, gjson.Encode(list))
+    b, err := gjson.Encode(list)
     if err != nil {
-        w.ResponseJson(0, err.Error(), nil)
+        w.WriteJson(0, err.Error(), nil)
+        return
+    }
+    _, err  = this.node.SendToLeader(gMSG_API_PEERS_REMOVE, gPORT_REPL, b)
+    if err != nil {
+        w.WriteJson(0, err.Error(), nil)
     } else {
-        w.ResponseJson(1, "ok", nil)
+        w.WriteJson(1, "ok", nil)
     }
 }

@@ -2,46 +2,53 @@
 package dister
 
 import (
-    "gitee.com/johng/gf/g/net/ghttp"
+    "errors"
     "gitee.com/johng/gf/g/encoding/gjson"
 )
 
 // Api数据查询
-func (n *Node) getDataByApi(k string) string {
-    var r ghttp.ResponseJson
+func (n *Node) getDataByApi(k string) ([]byte, error) {
     if k == "" {
         if n.DataMap.Size() > 1000 {
-            r = ghttp.ResponseJson{0, "too large data size, need a key to search", nil}
+            return nil, errors.New("too large data size, need a key to search")
         } else {
-            r = ghttp.ResponseJson{1, "ok", *n.DataMap.Clone()}
+            if b, err := gjson.Encode(*n.DataMap.Clone()); err != nil {
+                return nil, err
+            } else {
+                return b, nil
+            }
         }
     } else {
         if n.DataMap.Contains(k) {
-            r = ghttp.ResponseJson{1, "ok", n.DataMap.Get(k)}
+            return []byte(n.DataMap.Get(k)), nil
         } else {
-            r = ghttp.ResponseJson{0, "data not found", nil}
+            return nil, errors.New("data not found")
         }
     }
-    return gjson.Encode(r)
 }
 
 // Api Service查询
-func (n *Node) getServiceByApi(name string) string {
-    var r ghttp.ResponseJson
+func (n *Node) getServiceByApi(name string) ([]byte, error) {
     if name == "" {
         if n.Service.Size() > 1000 {
-            r = ghttp.ResponseJson{0, "too large service size, need a service name to search", nil}
+            return nil, errors.New("too large service size, need a service name to search")
         } else {
-            r = ghttp.ResponseJson{1, "ok", n.getServiceMapForApi()}
+            if b, err := gjson.Encode(n.getServiceMapForApi()); err != nil {
+                return nil, err
+            } else {
+                return b, nil
+            }
         }
     } else {
-        sc := n.getServiceForApiByName(name)
-        if sc != nil {
-            r = ghttp.ResponseJson{1, "ok", sc}
+        if sc := n.getServiceForApiByName(name); sc != nil {
+            if b, err := gjson.Encode(sc); err != nil {
+                return nil, err
+            } else {
+                return b, nil
+            }
         } else {
-            r = ghttp.ResponseJson{0, "service not found", nil}
+            return nil, errors.New("service not found")
         }
     }
-    return gjson.Encode(r)
 }
 

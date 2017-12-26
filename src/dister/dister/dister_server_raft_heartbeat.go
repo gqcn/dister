@@ -7,7 +7,7 @@ import (
 )
 
 // 通过心跳维持集群统治，如果心跳不及时，那么选民会重新进入选举流程
-// 每一个节点保持一个tcp长连接
+// leader为每一个节点保持一个tcp长连接，维持心跳通信，同时同步节点状态
 func (n *Node) heartbeatHandler() {
     // 存储已经保持心跳的节点
     conns := gset.NewStringSet()
@@ -35,14 +35,14 @@ func (n *Node) heartbeatHandler() {
                         n.Peers.Remove(id)
                         return
                     }
-
+                    // leader为每一个节点保持一个tcp长连接，维持心跳通信，同时同步节点状态
                     for {
                         // 如果当前节点不再是leader，或者节点表中已经删除该节点信息
                         if n.getRaftRole() != gROLE_RAFT_LEADER || !n.Peers.Contains(id) {
                             return
                         }
                         // 发送心跳
-                        if n.sendMsg(conn, gMSG_RAFT_HEARTBEAT, "") != nil {
+                        if n.sendMsg(conn, gMSG_RAFT_HEARTBEAT, nil) != nil {
                             n.updatePeerStatus(id, gSTATUS_DEAD)
                             return
                         }
@@ -55,6 +55,7 @@ func (n *Node) heartbeatHandler() {
                                     n.setLeader(&(msg.Info))
                                     n.setRaftRole(gROLE_RAFT_FOLLOWER)
 
+                                // 节点返回消息告诉leader不要再继续向它发送心跳，也许它属于不同的集群，该leader与其集群leader无法建立链接
                                 case gMSG_RAFT_SPLIT_BRAINS_UNSET:
                                     glog.Println("split brains occurred, remove node:", msg.Info.Name)
                                     n.Peers.Remove(msg.Info.Id)

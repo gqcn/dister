@@ -36,9 +36,34 @@ func (n *Node) electionHandler() {
 
 // 改进的RAFT选举
 func (n *Node) beginScore() {
-    var wg sync.WaitGroup
     glog.Debug("new election...")
-    // 请求比分，获取比分数据
+    // 请求比分数据
+    n.broadcastRequestingScoreRequest()
+    // 必需要获得多数派(n/2+1)比分（以保证能够连通绝大部分的节点）才能满足leader的基础条件
+    // 注意这里的ScoreCount和n.Peers.Size都不包含自身
+    scoreCount := n.getScoreCount() + 1
+    leastCount := int((n.Peers.Size() + 1)/2) + 1
+    if scoreCount < int32(leastCount) {
+        n.updateElectionDeadline()
+        //glog.Printf("election failed: could not reach major of the nodes, score count:%d, group size:%d\n", scoreCount, n.Peers.Size() + 1)
+        return
+    }
+    if n.checkFailedTheElection() {
+        return
+    }
+    // 执行比分，对比比分数据，选举出leader
+    n.broadcastComparingScoreRequest()
+    // 判断是否选举失败
+    if !n.checkFailedTheElection() {
+        //glog.Println("won the score comparison, become the leader")
+        n.setLeader(n.getNodeInfo())
+        n.setRaftRole(gROLE_RAFT_LEADER)
+    }
+}
+
+// 向集群中的所有节点请求获取比分数据
+func (n *Node) broadcastRequestingScoreRequest() {
+    wg := sync.WaitGroup{}
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE || n.getId() == info.Id {
@@ -62,7 +87,7 @@ func (n *Node) beginScore() {
                 n.Peers.Remove(info.Id)
                 return
             }
-            if err := n.sendMsg(conn, gMSG_RAFT_SCORE_REQUEST, ""); err != nil {
+            if err := n.sendMsg(conn, gMSG_RAFT_SCORE_REQUEST, nil); err != nil {
                 glog.Error(err)
                 return
             }
@@ -88,26 +113,18 @@ func (n *Node) beginScore() {
         }(&info)
     }
     wg.Wait()
+}
 
-    // 必需要获得多数派(n/2+1)比分（以保证能够连通绝大部分的节点）才能满足leader的基础条件
-    // 注意这里的ScoreCount和n.Peers.Size都不包含自身
-    scoreCount := n.getScoreCount() + 1
-    leastCount := int((n.Peers.Size() + 1)/2) + 1
-    if scoreCount < int32(leastCount) {
-        n.updateElectionDeadline()
-        //glog.Printf("election failed: could not reach major of the nodes, score count:%d, group size:%d\n", scoreCount, n.Peers.Size() + 1)
-        return
-    }
-
-    if n.checkFailedTheElection() {
-        return
-    }
-
-    // 执行比分，对比比分数据，选举出leader
-    compareData := gjson.Encode(map[string]interface{}{
+// 向集群中的所有节点请求对比比分数据
+func (n *Node) broadcastComparingScoreRequest() {
+    data, err := gjson.Encode(map[string]interface{}{
         "score": n.getScore(),
         "count": n.getScoreCount(),
     })
+    if err != nil {
+        return
+    }
+    wg := sync.WaitGroup{}
     for _, v := range n.Peers.Values() {
         info := v.(NodeInfo)
         if info.Status != gSTATUS_ALIVE {
@@ -119,14 +136,20 @@ func (n *Node) beginScore() {
             if n.checkFailedTheElection() {
                 return
             }
+            // 建立链接
             conn := n.getConn(info.Ip, gPORT_RAFT)
             if conn == nil {
                 n.updatePeerStatus(info.Id, gSTATUS_DEAD)
                 return
             }
             defer conn.Close()
-
-            if err := n.sendMsg(conn, gMSG_RAFT_SCORE_COMPARE_REQUEST, compareData); err != nil {
+            // 如果是本地同一节点通信，那么移除掉
+            if n.checkConnInLocalNode(conn) {
+                n.Peers.Remove(info.Id)
+                return
+            }
+            // 发送对比请求
+            if err := n.sendMsg(conn, gMSG_RAFT_SCORE_COMPARE_REQUEST, data); err != nil {
                 glog.Error(err)
                 return
             }
@@ -135,6 +158,7 @@ func (n *Node) beginScore() {
                 if n.checkFailedTheElection() {
                     return
                 }
+                // 处理对比结果
                 switch msg.Head {
                     // 对比过程中发现leader，那么设置leader
                     case gMSG_RAFT_I_AM_LEADER:
@@ -149,7 +173,7 @@ func (n *Node) beginScore() {
                         n.setRaftRole(gROLE_RAFT_FOLLOWER) // 别烦大人干正事
                         n.updateElectionDeadline()         // 自己先一边玩去
 
-                    // 对比成功，向leader的路又更迈进一步
+                        // 对比成功，向leader的路又更迈进一步
                     case gMSG_RAFT_SCORE_COMPARE_SUCCESS:
                         glog.Println("score comparison: get success from", msg.Info.Name)
                 }
@@ -157,13 +181,6 @@ func (n *Node) beginScore() {
         }(&info)
     }
     wg.Wait()
-
-    // 判断是否选举失败
-    if !n.checkFailedTheElection() {
-        //glog.Println("won the score comparison, become the leader")
-        n.setLeader(n.getNodeInfo())
-        n.setRaftRole(gROLE_RAFT_LEADER)
-    }
 }
 
 // 在选举流程中时刻调用该方法来检查是否选举失败，以便进一步做退出选举处理

@@ -19,7 +19,6 @@ import (
     "gitee.com/johng/gf/g/os/glog"
     "gitee.com/johng/gf/g/net/gipv4"
     "gitee.com/johng/gf/g/os/gfile"
-    "gitee.com/johng/gf/g/net/ghttp"
     "gitee.com/johng/gf/g/os/gconsole"
     "gitee.com/johng/gf/g/encoding/ghash"
     "gitee.com/johng/gf/g/container/gmap"
@@ -56,6 +55,7 @@ const (
 
     // 超时时间设置
     gTCP_RETRY_COUNT                        = 0       // TCP请求失败时的重试次数
+    gTCP_CONN_TIMEOUT                       = 3000    // (毫秒)TCP建立链接超时
     gTCP_READ_TIMEOUT                       = 6000    // (毫秒)TCP链接读取超时
     gELECTION_TIMEOUT                       = 2000    // (毫秒)RAFT选举超时时间(如果Leader挂掉之后到重新选举的时间间隔)
     gELECTION_TIMEOUT_HEARTBEAT             = 500     // (毫秒)RAFT Leader统治维持心跳间隔
@@ -151,25 +151,21 @@ type ServiceConfig struct {
 
 // 用于KV API接口的对象
 type NodeApiKv struct {
-    ghttp.Controller
     node *Node
 }
 
 // 用于Node API接口的对象
 type NodeApiNode struct {
-    ghttp.Controller
     node *Node
 }
 
 // 用于Service API接口的对象
 type NodeApiService struct {
-    ghttp.Controller
     node *Node
 }
 
 // 用于Service 负载均衡API接口的对象
 type NodeApiBalance struct {
-    ghttp.Controller
     node *Node
 }
 
@@ -197,7 +193,7 @@ type LogEntry struct {
 // 消息
 type Msg struct {
     Head int
-    Body string
+    Body []byte
     Info NodeInfo
 }
 
